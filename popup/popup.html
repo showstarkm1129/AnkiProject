@@ -1,68 +1,122 @@
-<!D OCTYPE html>
-    <html lang="ja">
+<!DOCTYPE html>
+<html lang="ja">
 
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Anki Card Creator</title>
-        <link rel="stylesheet" href="popup.css">
-    </head>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anki Card Creator</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
 
-    <body>
-        <div class="container">
-            <header class="header">
-                <h1>Anki Card Creator</h1>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>Anki Card Creator</h1>
+            <div class="header-right">
                 <div id="status-indicator" class="status-dot disconnected" title="AnkiConnect未接続"></div>
-            </header>
+            </div>
+        </header>
 
-            <!-- デッキ選択 -->
-            <section class="section">
-                <label for="deck-select" class="label">デッキ</label>
-                <select id="deck-select" class="select">
-                    <option value="">読み込み中...</option>
-                </select>
-            </section>
+        <!-- AI設定セクション（上部に配置） -->
+        <section class="ai-panel">
+            <div class="ai-header">
+                <div class="toggle-row">
+                    <span class="ai-label">🤖 AI解説モード</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="ai-mode-toggle">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
 
-            <!-- アクションボタン -->
-            <section class="section actions">
-                <button id="btn-question" class="btn btn-primary" disabled>
-                    <span class="btn-icon">📷</span>
-                    問題を追加
-                </button>
-                <button id="btn-answer" class="btn btn-secondary" disabled>
-                    <span class="btn-icon">📝</span>
-                    解説を追加
-                </button>
-            </section>
-
-            <!-- プレビュー -->
-            <section class="section previews">
-                <div class="preview-card">
-                    <div class="preview-label">問題（表面）</div>
-                    <div id="preview-front" class="preview-area">
-                        <span class="preview-placeholder">未選択</span>
+            <!-- AIモードON時に表示される設定 -->
+            <div id="ai-settings" class="ai-settings hidden">
+                <div class="settings-row">
+                    <label for="api-provider" class="label-inline">API</label>
+                    <select id="api-provider" class="select-small">
+                        <option value="gemini">Gemini</option>
+                        <option value="openai">OpenAI</option>
+                    </select>
+                </div>
+                <div class="settings-row">
+                    <label for="llm-model" class="label-inline">モデル</label>
+                    <input id="llm-model" type="text" class="input-small" placeholder="gemini-2.5-flash">
+                </div>
+                <div class="settings-row">
+                    <label for="api-key" class="label-inline">APIキー</label>
+                    <div class="input-row">
+                        <input id="api-key" type="password" class="input-small" placeholder="キーを入力...">
+                        <button id="btn-save-api" class="btn btn-tiny">保存</button>
                     </div>
                 </div>
-                <div class="preview-card">
-                    <div class="preview-label">解説（裏面）</div>
-                    <div id="preview-back" class="preview-area">
-                        <span class="preview-placeholder">未選択</span>
-                    </div>
+                <div id="api-status" class="api-status"></div>
+                <textarea id="custom-instruction" class="textarea"
+                    placeholder="カスタム指示を入力...&#10;例: 英単語の解説をしてほしい&#10;例: 選択肢それぞれの解説を作成してほしい"></textarea>
+            </div>
+        </section>
+
+        <!-- デッキ選択 -->
+        <section class="section">
+            <label for="deck-select" class="label">デッキ</label>
+            <select id="deck-select" class="select">
+                <option value="">読み込み中...</option>
+            </select>
+        </section>
+
+        <!-- ノートタイプ選択 -->
+        <section class="section">
+            <label for="model-select" class="label">ノートタイプ</label>
+            <select id="model-select" class="select">
+                <option value="">読み込み中...</option>
+            </select>
+        </section>
+
+        <!-- アクションボタン -->
+        <section class="section actions">
+            <button id="btn-question" class="btn btn-primary" disabled>
+                <span class="btn-icon">📷</span>
+                問題を追加
+            </button>
+            <button id="btn-answer" class="btn btn-secondary" disabled>
+                <span class="btn-icon">📝</span>
+                解説を追加
+            </button>
+        </section>
+
+        <!-- プレビュー -->
+        <section class="section previews">
+            <div class="preview-card">
+                <div class="preview-header">
+                    <span class="preview-label">問題（表面）</span>
+                    <button id="btn-clear-front" class="btn-clear hidden" title="クリア">✕</button>
                 </div>
-            </section>
+                <div id="preview-front" class="preview-area">
+                    <span class="preview-placeholder">未選択</span>
+                </div>
+            </div>
+            <div class="preview-card">
+                <div class="preview-header">
+                    <span class="preview-label">解説（裏面）</span>
+                    <button id="btn-clear-back" class="btn-clear hidden" title="クリア">✕</button>
+                </div>
+                <div id="preview-back" class="preview-area">
+                    <span class="preview-placeholder">未選択</span>
+                </div>
+            </div>
+        </section>
 
-            <!-- 保存ボタン -->
-            <section class="section">
-                <button id="btn-save" class="btn btn-save" disabled>
-                    カードを保存
-                </button>
-            </section>
+        <!-- 保存ボタン -->
+        <section class="section">
+            <button id="btn-save" class="btn btn-save" disabled>
+                カードを保存
+            </button>
+        </section>
 
-            <!-- ステータスメッセージ -->
-            <div id="status-message" class="status-message"></div>
-        </div>
+        <!-- ステータスメッセージ -->
+        <div id="status-message" class="status-message"></div>
+    </div>
 
-        <script src="popup.js"></script>
-    </body>
+    <script src="popup.js"></script>
+</body>
 
-    </html>
+</html>

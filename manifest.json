@@ -6,11 +6,12 @@
     "permissions": [
         "activeTab",
         "scripting",
-        "offscreen",
         "storage"
     ],
     "host_permissions": [
-        "http://localhost:8765/*"
+        "http://localhost:8765/*",
+        "https://generativelanguage.googleapis.com/*",
+        "https://api.openai.com/*"
     ],
     "action": {
         "default_popup": "popup/popup.html",

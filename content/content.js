@@ -1,15 +1,27 @@
 /**
  * Anki Card Creator — Content Script
- * Webページ上で範囲選択オーバーレイを提供する
+ * Webページ上で範囲選択オーバーレイとトリミング処理を提供する
  */
 
 (() => {
-    // 二重読み込み防止
-    if (window.__ankiCardCreatorInjected) return;
+    // 既存のオーバーレイを必ず削除（連打対策）
+    function removeExistingOverlay() {
+        const existingOverlay = document.getElementById('anki-capture-overlay');
+        const existingBox = document.getElementById('anki-selection-box');
+        const existingLabel = document.getElementById('anki-instruction-label');
+        if (existingOverlay) existingOverlay.remove();
+        if (existingBox) existingBox.remove();
+        if (existingLabel) existingLabel.remove();
+    }
+
+    // 二重リスナー防止
+    if (window.__ankiCardCreatorInjected) {
+        return;
+    }
     window.__ankiCardCreatorInjected = true;
 
     let isSelecting = false;
-    let currentSide = null; // 'front' or 'back'
+    let currentSide = null;
     let startX = 0;
     let startY = 0;
     let overlay = null;
@@ -20,6 +32,7 @@
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.action === 'startSelection') {
             currentSide = message.side;
+            cleanup();
             beginSelection();
             sendResponse({ status: 'ok' });
         }
@@ -28,7 +41,8 @@
 
     // --- 範囲選択の開始 ---
     function beginSelection() {
-        // オーバーレイを作成
+        removeExistingOverlay();
+
         overlay = document.createElement('div');
         overlay.id = 'anki-capture-overlay';
         overlay.style.cssText = `
@@ -43,7 +57,6 @@
       user-select: none;
     `;
 
-        // 選択矩形
         selectionBox = document.createElement('div');
         selectionBox.id = 'anki-selection-box';
         selectionBox.style.cssText = `
@@ -56,7 +69,6 @@
       pointer-events: none;
     `;
 
-        // 操作説明ラベル
         instructionLabel = document.createElement('div');
         instructionLabel.id = 'anki-instruction-label';
         const sideText = currentSide === 'front' ? '問題（表面）' : '解説（裏面）';
@@ -83,10 +95,8 @@
         document.body.appendChild(selectionBox);
         document.body.appendChild(instructionLabel);
 
-        // イベントリスナー
         overlay.addEventListener('mousedown', onMouseDown);
         document.addEventListener('keydown', onKeyDown);
-
         isSelecting = true;
     }
 
@@ -110,10 +120,8 @@
 
     function onMouseMove(e) {
         e.preventDefault();
-
         const currentX = e.clientX;
         const currentY = e.clientY;
-
         const left = Math.min(startX, currentX);
         const top = Math.min(startY, currentY);
         const width = Math.abs(currentX - startX);
@@ -127,7 +135,6 @@
 
     function onMouseUp(e) {
         e.preventDefault();
-
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
 
@@ -141,46 +148,85 @@
             height: Math.abs(currentY - startY)
         };
 
-        // 最小サイズチェック
         if (rect.width < 10 || rect.height < 10) {
             cleanup();
             return;
         }
 
-        // オーバーレイを一時非表示にしてキャプチャ
         captureRegion(rect);
     }
 
-    // --- キャプチャ処理 ---
+    // --- キャプチャ + トリミング処理 ---
     async function captureRegion(rect) {
-        // オーバーレイを非表示
+        // オーバーレイを非表示にする
         overlay.style.display = 'none';
         selectionBox.style.display = 'none';
         instructionLabel.style.display = 'none';
 
-        // 少し待ってからキャプチャ（オーバーレイが消えるのを待つ）
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // オーバーレイが消えるのを待つ
+        await new Promise(resolve => setTimeout(resolve, 150));
 
-        // Background Workerにキャプチャを依頼
+        const side = currentSide;
+
         try {
+            // Step 1: Background Workerにフルスクリーンキャプチャを依頼
             const response = await chrome.runtime.sendMessage({
-                action: 'captureTab',
-                rect: rect,
-                side: currentSide,
-                devicePixelRatio: window.devicePixelRatio || 1
+                action: 'captureTab'
             });
 
-            if (response.success) {
-                // ポップアップに結果を通知（ポップアップが開いていない場合もある）
-                // Background workerが処理する
-            } else {
+            if (!response.success) {
                 console.error('Capture failed:', response.error);
+                cleanup();
+                return;
             }
+
+            // Step 2: Content Script側でCanvasを使ってトリミング
+            const dpr = window.devicePixelRatio || 1;
+            const croppedDataUrl = await cropWithCanvas(response.dataUrl, rect, dpr);
+
+            // Step 3: トリミング済み画像をBackground Workerに保存
+            await chrome.runtime.sendMessage({
+                action: 'storeImage',
+                side: side,
+                imageData: croppedDataUrl
+            });
+
         } catch (error) {
             console.error('Capture error:', error);
         }
 
         cleanup();
+    }
+
+    // --- Canvasでトリミング ---
+    function cropWithCanvas(dataUrl, rect, dpr) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+
+                    // DPR考慮した座標
+                    const sx = Math.round(rect.left * dpr);
+                    const sy = Math.round(rect.top * dpr);
+                    const sw = Math.round(rect.width * dpr);
+                    const sh = Math.round(rect.height * dpr);
+
+                    canvas.width = sw;
+                    canvas.height = sh;
+
+                    // トリミングして描画
+                    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+
+                    resolve(canvas.toDataURL('image/png'));
+                } catch (error) {
+                    reject(error);
+                }
+            };
+            img.onerror = () => reject(new Error('画像の読み込みに失敗しました'));
+            img.src = dataUrl;
+        });
     }
 
     // --- キーボード操作 ---
@@ -196,23 +242,10 @@
         document.removeEventListener('mouseup', onMouseUp);
         document.removeEventListener('keydown', onKeyDown);
 
-        if (overlay) {
-            overlay.remove();
-            overlay = null;
-        }
-        if (selectionBox) {
-            selectionBox.remove();
-            selectionBox = null;
-        }
-        if (instructionLabel) {
-            instructionLabel.remove();
-            instructionLabel = null;
-        }
+        if (overlay) { overlay.remove(); overlay = null; }
+        if (selectionBox) { selectionBox.remove(); selectionBox = null; }
+        if (instructionLabel) { instructionLabel.remove(); instructionLabel = null; }
 
         isSelecting = false;
-        currentSide = null;
-
-        // 再度注入できるようにフラグをリセット
-        window.__ankiCardCreatorInjected = false;
     }
 })();

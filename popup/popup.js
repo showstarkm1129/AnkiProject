@@ -1,15 +1,19 @@
 /**
  * Anki Card Creator — Popup Script
- * ポップアップUIのロジックを管理する
+ * ポップアップUIのロジックを管理する（AI解説モード対応）
  */
 
 // --- State ---
 let currentDeck = '';
-let frontImageData = null;  // Base64 画像データ
+let currentModel = '';
+let frontImageData = null;
 let backImageData = null;
+let backTextData = null;
+let aiModeEnabled = false;
 
 // --- DOM Elements ---
 const deckSelect = document.getElementById('deck-select');
+const modelSelect = document.getElementById('model-select');
 const btnQuestion = document.getElementById('btn-question');
 const btnAnswer = document.getElementById('btn-answer');
 const btnSave = document.getElementById('btn-save');
@@ -17,6 +21,24 @@ const previewFront = document.getElementById('preview-front');
 const previewBack = document.getElementById('preview-back');
 const statusIndicator = document.getElementById('status-indicator');
 const statusMessage = document.getElementById('status-message');
+const btnClearFront = document.getElementById('btn-clear-front');
+const btnClearBack = document.getElementById('btn-clear-back');
+
+// AI Settings
+const aiModeToggle = document.getElementById('ai-mode-toggle');
+const aiSettings = document.getElementById('ai-settings');
+const apiProvider = document.getElementById('api-provider');
+const llmModelInput = document.getElementById('llm-model');
+const apiKeyInput = document.getElementById('api-key');
+const btnSaveApi = document.getElementById('btn-save-api');
+const apiStatus = document.getElementById('api-status');
+const customInstruction = document.getElementById('custom-instruction');
+
+// --- デフォルトモデル名 ---
+const DEFAULT_MODELS = {
+    gemini: 'gemini-2.5-flash',
+    openai: 'gpt-4o-mini'
+};
 
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', init);
@@ -24,56 +46,163 @@ document.addEventListener('DOMContentLoaded', init);
 async function init() {
     showStatus('AnkiConnectに接続中...', 'info');
 
-    // 1. AnkiConnectからデッキ一覧を取得
+    // 1. AnkiConnect接続
     try {
-        const response = await chrome.runtime.sendMessage({ action: 'getDeckNames' });
+        const [deckResponse, modelResponse] = await Promise.all([
+            chrome.runtime.sendMessage({ action: 'getDeckNames' }),
+            chrome.runtime.sendMessage({ action: 'getModelNames' })
+        ]);
 
-        if (response.success) {
+        if (deckResponse.success && modelResponse.success) {
             statusIndicator.className = 'status-dot connected';
             statusIndicator.title = 'AnkiConnect接続済み';
-            populateDeckSelect(response.data);
+            populateDeckSelect(deckResponse.data);
+            populateModelSelect(modelResponse.data);
             enableButtons();
-            showStatus('接続完了！デッキを選択してください', 'success');
+            showStatus('接続完了！', 'success');
         } else {
-            throw new Error(response.error || 'デッキの取得に失敗しました');
+            throw new Error(deckResponse.error || modelResponse.error || '接続失敗');
         }
     } catch (error) {
         statusIndicator.className = 'status-dot disconnected';
-        statusIndicator.title = 'AnkiConnect未接続';
-        showStatus('AnkiConnectに接続できません。Ankiが起動しているか確認してください。', 'error');
-        console.error('AnkiConnect error:', error);
+        showStatus('AnkiConnectに接続できません。Ankiを起動してください。', 'error');
     }
 
-    // 2. Background workerからカード状態を復元
+    // 2. 保存済み設定を復元
+    chrome.storage.local.get(
+        ['apiProvider', 'apiKey', 'llmModel', 'aiMode', 'customInstruction'],
+        (result) => {
+            if (result.apiProvider) apiProvider.value = result.apiProvider;
+
+            // モデル名: 保存済みがあればそれ、なければデフォルト
+            const provider = result.apiProvider || 'gemini';
+            llmModelInput.value = result.llmModel || DEFAULT_MODELS[provider] || '';
+
+            if (result.apiKey) {
+                apiKeyInput.value = result.apiKey;
+                apiStatus.textContent = '✓ APIキー保存済み';
+                apiStatus.className = 'api-status saved';
+            } else {
+                apiStatus.textContent = 'APIキー未設定';
+                apiStatus.className = 'api-status missing';
+            }
+
+            if (result.aiMode) {
+                aiModeEnabled = true;
+                aiModeToggle.checked = true;
+                aiSettings.classList.remove('hidden');
+                updateAnswerButton();
+            }
+
+            if (result.customInstruction) {
+                customInstruction.value = result.customInstruction;
+            }
+        }
+    );
+
+    // 3. カード状態を復元
     try {
         const stateResponse = await chrome.runtime.sendMessage({ action: 'getState' });
         if (stateResponse.success && stateResponse.cardState) {
-            const { frontImage, backImage } = stateResponse.cardState;
+            const { frontImage, backImage, backText } = stateResponse.cardState;
             if (frontImage) {
                 frontImageData = frontImage;
-                updatePreview(previewFront, frontImage);
+                updatePreviewImage(previewFront, frontImage);
                 btnQuestion.classList.add('captured');
             }
             if (backImage) {
                 backImageData = backImage;
-                updatePreview(previewBack, backImage);
+                updatePreviewImage(previewBack, backImage);
                 btnAnswer.classList.add('captured');
             }
-            if (frontImage || backImage) {
+            if (backText) {
+                backTextData = backText;
+                updatePreviewText(previewBack, backText);
+                btnAnswer.classList.add('captured');
+            }
+            if (frontImage || backImage || backText) {
                 showStatus('前回のキャプチャを復元しました', 'success');
             }
         }
-    } catch (e) {
-        // 状態がない場合は無視
-    }
+    } catch (e) { /* ignore */ }
 
-    // 3. Event listeners
+    // 4. Event listeners
     deckSelect.addEventListener('change', onDeckChange);
+    modelSelect.addEventListener('change', onModelChange);
     btnQuestion.addEventListener('click', () => startCapture('front'));
     btnAnswer.addEventListener('click', () => startCapture('back'));
     btnSave.addEventListener('click', saveCard);
 
+    aiModeToggle.addEventListener('change', onAiModeChange);
+    apiProvider.addEventListener('change', onProviderChange);
+    btnSaveApi.addEventListener('click', saveApiSettings);
+    llmModelInput.addEventListener('change', saveLlmModel);
+    customInstruction.addEventListener('input', debounce(saveCustomInstruction, 500));
+    btnClearFront.addEventListener('click', clearFront);
+    btnClearBack.addEventListener('click', clearBack);
+
     updateSaveButton();
+}
+
+// --- AI Mode ---
+function onAiModeChange() {
+    aiModeEnabled = aiModeToggle.checked;
+    chrome.storage.local.set({ aiMode: aiModeEnabled });
+
+    if (aiModeEnabled) {
+        aiSettings.classList.remove('hidden');
+    } else {
+        aiSettings.classList.add('hidden');
+    }
+    updateAnswerButton();
+}
+
+function onProviderChange() {
+    const provider = apiProvider.value;
+    chrome.storage.local.set({ apiProvider: provider });
+
+    // モデル名のプレースホルダーを更新
+    llmModelInput.placeholder = DEFAULT_MODELS[provider] || '';
+
+    // モデル名がデフォルトのままだったら新プロバイダーのデフォルトに切替
+    const currentVal = llmModelInput.value;
+    const isDefault = !currentVal || Object.values(DEFAULT_MODELS).includes(currentVal);
+    if (isDefault) {
+        llmModelInput.value = DEFAULT_MODELS[provider] || '';
+        chrome.storage.local.set({ llmModel: llmModelInput.value });
+    }
+}
+
+function updateAnswerButton() {
+    if (aiModeEnabled) {
+        btnAnswer.innerHTML = '<span class="btn-icon">🤖</span>AI解説を生成';
+    } else {
+        btnAnswer.innerHTML = '<span class="btn-icon">📝</span>解説を追加';
+    }
+}
+
+function saveApiSettings() {
+    const key = apiKeyInput.value.trim();
+    if (!key) {
+        apiStatus.textContent = '⚠ APIキーを入力してください';
+        apiStatus.className = 'api-status missing';
+        return;
+    }
+    chrome.storage.local.set({
+        apiProvider: apiProvider.value,
+        apiKey: key
+    }, () => {
+        apiStatus.textContent = '✓ 保存しました';
+        apiStatus.className = 'api-status saved';
+    });
+}
+
+function saveLlmModel() {
+    chrome.storage.local.set({ llmModel: llmModelInput.value });
+}
+
+function saveCustomInstruction() {
+    chrome.storage.local.set({ customInstruction: customInstruction.value });
 }
 
 // --- Deck Selection ---
@@ -85,8 +214,6 @@ function populateDeckSelect(decks) {
         option.textContent = deck;
         deckSelect.appendChild(option);
     });
-
-    // 前回選択したデッキを復元
     chrome.storage.local.get('lastDeck', (result) => {
         if (result.lastDeck && decks.includes(result.lastDeck)) {
             deckSelect.value = result.lastDeck;
@@ -98,65 +225,139 @@ function populateDeckSelect(decks) {
 
 function onDeckChange() {
     currentDeck = deckSelect.value;
-    if (currentDeck) {
-        chrome.storage.local.set({ lastDeck: currentDeck });
-        showStatus(`デッキ: ${currentDeck}`, 'success');
-    }
+    if (currentDeck) chrome.storage.local.set({ lastDeck: currentDeck });
+    updateSaveButton();
+}
+
+// --- Model Selection ---
+function populateModelSelect(models) {
+    modelSelect.innerHTML = '<option value="">ノートタイプを選択...</option>';
+    models.sort().forEach(model => {
+        const option = document.createElement('option');
+        option.value = model;
+        option.textContent = model;
+        modelSelect.appendChild(option);
+    });
+    chrome.storage.local.get('lastModel', (result) => {
+        if (result.lastModel && models.includes(result.lastModel)) {
+            modelSelect.value = result.lastModel;
+            currentModel = result.lastModel;
+        }
+        updateSaveButton();
+    });
+}
+
+function onModelChange() {
+    currentModel = modelSelect.value;
+    if (currentModel) chrome.storage.local.set({ lastModel: currentModel });
     updateSaveButton();
 }
 
 // --- Capture ---
 async function startCapture(side) {
-    if (!currentDeck) {
-        showStatus('先にデッキを選択してください', 'error');
+    if (!currentDeck) { showStatus('先にデッキを選択してください', 'error'); return; }
+    if (!currentModel) { showStatus('先にノートタイプを選択してください', 'error'); return; }
+
+    // AIモードで「解説」ボタンを押した場合
+    if (side === 'back' && aiModeEnabled) {
+        await generateAiExplanation();
         return;
     }
 
     showStatus(`${side === 'front' ? '問題' : '解説'}の範囲を選択してください...`, 'info');
 
-    // 現在のアクティブタブを取得
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab) { showStatus('アクティブなタブがありません', 'error'); return; }
 
-    if (!tab) {
-        showStatus('アクティブなタブがありません', 'error');
-        return;
-    }
-
-    // Content Scriptを注入して範囲選択を開始
     try {
         await chrome.scripting.executeScript({
             target: { tabId: tab.id },
             files: ['content/content.js']
         });
-    } catch (e) {
-        // 既に注入済みの場合
-        console.log('Content script injection:', e.message);
+    } catch (e) { /* already injected */ }
+
+    chrome.tabs.sendMessage(tab.id, { action: 'startSelection', side: side });
+}
+
+// --- AI Explanation ---
+async function generateAiExplanation() {
+    if (!frontImageData) {
+        showStatus('先に問題をキャプチャしてください', 'error');
+        return;
     }
 
-    // Content Scriptに範囲選択開始を通知
-    chrome.tabs.sendMessage(tab.id, {
-        action: 'startSelection',
-        side: side
-    });
+    const settings = await chrome.storage.local.get(['apiProvider', 'apiKey', 'llmModel']);
+    if (!settings.apiKey) {
+        showStatus('⚙️ APIキーを設定してください', 'error');
+        return;
+    }
 
-    // ポップアップは自動で閉じる（ユーザーがページをクリックするため）
-    // 次回ポップアップを開いたときにgetStateで状態を復元する
+    showStatus('🤖 AI解説を生成中...', 'info');
+    btnAnswer.disabled = true;
+
+    try {
+        const response = await chrome.runtime.sendMessage({
+            action: 'generateExplanation',
+            imageData: frontImageData,
+            provider: settings.apiProvider || 'gemini',
+            apiKey: settings.apiKey,
+            llmModel: settings.llmModel || DEFAULT_MODELS[settings.apiProvider || 'gemini'],
+            customInstruction: customInstruction.value || ''
+        });
+
+        if (response.success) {
+            backTextData = response.text;
+            backImageData = null;
+            updatePreviewText(previewBack, response.text);
+            btnAnswer.classList.add('captured');
+
+            await chrome.runtime.sendMessage({
+                action: 'storeImage',
+                side: 'backText',
+                imageData: response.text
+            });
+
+            showStatus('✨ AI解説を生成しました！', 'success');
+        } else {
+            throw new Error(response.error);
+        }
+    } catch (error) {
+        showStatus(`AI エラー: ${error.message}`, 'error');
+    }
+
+    btnAnswer.disabled = false;
+    updateSaveButton();
 }
 
 // --- Preview ---
-function updatePreview(previewEl, imageData) {
+function updatePreviewImage(previewEl, imageData) {
     previewEl.innerHTML = '';
+    previewEl.classList.remove('has-text');
     const img = document.createElement('img');
     img.src = imageData;
     img.alt = 'キャプチャ画像';
     previewEl.appendChild(img);
     previewEl.classList.add('has-image');
+    // クリアボタンを表示
+    if (previewEl.id === 'preview-front') btnClearFront.classList.remove('hidden');
+    if (previewEl.id === 'preview-back') btnClearBack.classList.remove('hidden');
+}
+
+function updatePreviewText(previewEl, text) {
+    previewEl.innerHTML = '';
+    previewEl.classList.remove('has-image');
+    const p = document.createElement('div');
+    p.className = 'preview-text';
+    p.textContent = text;
+    previewEl.appendChild(p);
+    previewEl.classList.add('has-text');
+    if (previewEl.id === 'preview-back') btnClearBack.classList.remove('hidden');
 }
 
 // --- Save Card ---
 async function saveCard() {
-    if (!currentDeck || !frontImageData) {
-        showStatus('問題の画像が必要です', 'error');
+    if (!currentDeck || !currentModel || !frontImageData) {
+        showStatus('デッキ、ノートタイプ、問題の画像が必要です', 'error');
         return;
     }
 
@@ -167,15 +368,17 @@ async function saveCard() {
         const response = await chrome.runtime.sendMessage({
             action: 'addCard',
             deckName: currentDeck,
+            modelName: currentModel,
             frontImage: frontImageData,
-            backImage: backImageData
+            backImage: backImageData,
+            backText: backTextData
         });
 
         if (response.success) {
             showStatus('カードを保存しました！ 🎉', 'success');
             resetCard();
         } else {
-            throw new Error(response.error || 'カードの追加に失敗しました');
+            throw new Error(response.error);
         }
     } catch (error) {
         showStatus(`保存エラー: ${error.message}`, 'error');
@@ -183,25 +386,51 @@ async function saveCard() {
     }
 }
 
+// --- Clear ---
+function clearFront() {
+    frontImageData = null;
+    previewFront.innerHTML = '<span class="preview-placeholder">未選択</span>';
+    previewFront.classList.remove('has-image');
+    btnQuestion.classList.remove('captured');
+    btnClearFront.classList.add('hidden');
+    chrome.runtime.sendMessage({ action: 'storeImage', side: 'front', imageData: null });
+    updateSaveButton();
+    showStatus('問題をクリアしました', 'info');
+}
+
+function clearBack() {
+    backImageData = null;
+    backTextData = null;
+    previewBack.innerHTML = '<span class="preview-placeholder">未選択</span>';
+    previewBack.classList.remove('has-image');
+    previewBack.classList.remove('has-text');
+    btnAnswer.classList.remove('captured');
+    btnClearBack.classList.add('hidden');
+    chrome.runtime.sendMessage({ action: 'storeImage', side: 'back', imageData: null });
+    chrome.runtime.sendMessage({ action: 'storeImage', side: 'backText', imageData: null });
+    updateSaveButton();
+    showStatus('解説をクリアしました', 'info');
+}
+
 // --- Reset ---
 function resetCard() {
     frontImageData = null;
     backImageData = null;
+    backTextData = null;
 
     previewFront.innerHTML = '<span class="preview-placeholder">未選択</span>';
     previewFront.classList.remove('has-image');
     previewBack.innerHTML = '<span class="preview-placeholder">未選択</span>';
     previewBack.classList.remove('has-image');
+    previewBack.classList.remove('has-text');
 
     btnQuestion.classList.remove('captured');
     btnAnswer.classList.remove('captured');
-
+    btnClearFront.classList.add('hidden');
+    btnClearBack.classList.add('hidden');
     updateSaveButton();
 
-    // 2秒後にステータスをリセット
-    setTimeout(() => {
-        showStatus('次のカードを追加できます', 'success');
-    }, 2000);
+    setTimeout(() => showStatus('次のカードを追加できます', 'success'), 2000);
 }
 
 // --- UI Helpers ---
@@ -211,11 +440,15 @@ function enableButtons() {
 }
 
 function updateSaveButton() {
-    // 問題（表面）があれば保存可能（解説はオプション）
-    btnSave.disabled = !(currentDeck && frontImageData);
+    btnSave.disabled = !(currentDeck && currentModel && frontImageData);
 }
 
 function showStatus(text, type) {
     statusMessage.textContent = text;
     statusMessage.className = `status-message ${type}`;
+}
+
+function debounce(fn, ms) {
+    let id;
+    return (...args) => { clearTimeout(id); id = setTimeout(() => fn(...args), ms); };
 }

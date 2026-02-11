@@ -1,6 +1,6 @@
 /**
  * Anki Card Creator — Background Service Worker
- * AnkiConnect通信、タブキャプチャ、画像トリミングを担当
+ * AnkiConnect通信、タブキャプチャ、LLM API連携を担当
  */
 
 const ANKI_CONNECT_URL = 'http://localhost:8765';
@@ -8,13 +8,13 @@ const ANKI_CONNECT_URL = 'http://localhost:8765';
 // --- 現在のカードの状態 ---
 let cardState = {
     frontImage: null,
-    backImage: null
+    backImage: null,
+    backText: null
 };
 
 // --- メッセージハンドラ ---
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    // offscreen document や popup からのメッセージを区別
-    // captureComplete / cropImage はoffscreen用なのでここでは無視
+    // offscreen用メッセージは無視
     if (message.action === 'cropImage' || message.action === 'captureComplete') {
         return false;
     }
@@ -22,7 +22,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleMessage(message, sender)
         .then(sendResponse)
         .catch(error => sendResponse({ success: false, error: error.message }));
-    return true; // 非同期レスポンスを使用
+    return true;
 });
 
 async function handleMessage(message, sender) {
@@ -30,11 +30,20 @@ async function handleMessage(message, sender) {
         case 'getDeckNames':
             return await getDeckNames();
 
+        case 'getModelNames':
+            return await getModelNames();
+
         case 'captureTab':
-            return await captureAndCrop(message, sender);
+            return await captureTab(sender);
+
+        case 'storeImage':
+            return storeImage(message);
 
         case 'addCard':
             return await addCard(message);
+
+        case 'generateExplanation':
+            return await generateExplanation(message);
 
         case 'getState':
             return { success: true, cardState: cardState };
@@ -79,123 +88,237 @@ async function getDeckNames() {
     }
 }
 
-// --- タブキャプチャ + トリミング ---
-async function captureAndCrop(message, sender) {
-    const { rect, side, devicePixelRatio } = message;
-
+// --- モデル一覧取得 ---
+async function getModelNames() {
     try {
-        // 現在のタブをキャプチャ
-        const tabId = sender.tab.id;
-        const windowId = sender.tab.windowId;
-
-        const dataUrl = await chrome.tabs.captureVisibleTab(windowId, {
-            format: 'png'
-        });
-
-        // OffscreenDocumentでトリミング
-        const croppedImage = await cropImage(dataUrl, rect, devicePixelRatio);
-
-        // 状態を保存（ポップアップが閉じていても残る）
-        if (side === 'front') {
-            cardState.frontImage = croppedImage;
-        } else {
-            cardState.backImage = croppedImage;
-        }
-
-        // バッジで通知（ポップアップが閉じていても見える）
-        const badge = side === 'front' ? 'Q' : 'A';
-        const existing = cardState.frontImage && cardState.backImage ? 'QA' : badge;
-        chrome.action.setBadgeText({ text: existing });
-        chrome.action.setBadgeBackgroundColor({ color: '#66bb6a' });
-
-        return { success: true };
+        const models = await ankiConnectRequest('modelNames');
+        return { success: true, data: models };
     } catch (error) {
         return { success: false, error: error.message };
     }
 }
 
-// --- 画像トリミング ---
-async function cropImage(dataUrl, rect, dpr) {
+// --- タブキャプチャ ---
+async function captureTab(sender) {
     try {
-        // Offscreen documentが存在するか確認
-        const existingContexts = await chrome.runtime.getContexts({
-            contextTypes: ['OFFSCREEN_DOCUMENT']
-        });
-
-        if (existingContexts.length === 0) {
-            await chrome.offscreen.createDocument({
-                url: 'offscreen/offscreen.html',
-                reasons: ['CANVAS'],
-                justification: 'Crop captured tab image'
-            });
-        }
-
-        // offscreen documentにメッセージを送る
-        const response = await chrome.runtime.sendMessage({
-            action: 'cropImage',
-            target: 'offscreen',
-            dataUrl: dataUrl,
-            rect: rect,
-            dpr: dpr
-        });
-
-        return response.croppedImage;
+        const windowId = sender.tab.windowId;
+        const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
+        return { success: true, dataUrl: dataUrl };
     } catch (error) {
-        console.error('Offscreen crop failed, using fallback:', error);
-        // フォールバック: トリミングなしで画像を返す
-        return dataUrl;
+        return { success: false, error: error.message };
     }
 }
 
-// --- カード追加 ---
-async function addCard(message) {
-    const { deckName, frontImage, backImage } = message;
+// --- 画像/テキスト保存 ---
+function storeImage(message) {
+    const { side, imageData } = message;
 
-    // メッセージから来た画像を優先、なければcardStateから
+    if (side === 'front') {
+        cardState.frontImage = imageData;
+    } else if (side === 'backText') {
+        cardState.backText = imageData; // テキストとして保存
+        cardState.backImage = null;
+    } else {
+        cardState.backImage = imageData;
+        cardState.backText = null;
+    }
+
+    // バッジ更新
+    const hasBack = cardState.backImage || cardState.backText;
+    const badgeText = (cardState.frontImage && hasBack) ? 'QA'
+        : cardState.frontImage ? 'Q'
+            : hasBack ? 'A'
+                : '';
+    chrome.action.setBadgeText({ text: badgeText });
+    chrome.action.setBadgeBackgroundColor({ color: '#66bb6a' });
+
+    return { success: true };
+}
+
+// ===========================================
+// LLM API 連携
+// ===========================================
+
+async function generateExplanation(message) {
+    const { imageData, provider, apiKey, llmModel, customInstruction } = message;
+
+    if (!apiKey) {
+        return { success: false, error: 'APIキーが設定されていません' };
+    }
+
+    if (!imageData) {
+        return { success: false, error: '問題の画像がありません' };
+    }
+
+    const base64 = imageData.replace(/^data:image\/\w+;base64,/, '');
+    const mimeType = imageData.match(/^data:(image\/\w+);/)?.[1] || 'image/png';
+
+    // プロンプト構築
+    let systemPrompt = 'あなたは学習支援AIです。画像に写っている問題を分析し、わかりやすい解説を作成してください。';
+    if (customInstruction) {
+        systemPrompt += `\n\nユーザーからの指示: ${customInstruction}`;
+    }
+    systemPrompt += '\n\nHTMLの記述で出力して';
+
+    try {
+        let text;
+        if (provider === 'gemini') {
+            text = await callGemini(apiKey, base64, mimeType, systemPrompt, llmModel || 'gemini-2.5-flash');
+        } else if (provider === 'openai') {
+            text = await callOpenAI(apiKey, base64, mimeType, systemPrompt, llmModel || 'gpt-4o-mini');
+        } else {
+            return { success: false, error: `未対応のAPI: ${provider}` };
+        }
+
+        return { success: true, text: text };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+}
+
+// --- Gemini API ---
+async function callGemini(apiKey, base64, mimeType, prompt, model) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            contents: [{
+                parts: [
+                    { text: prompt },
+                    {
+                        inline_data: {
+                            mime_type: mimeType,
+                            data: base64
+                        }
+                    }
+                ]
+            }]
+        })
+    });
+
+    if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`Gemini API error (${response.status}): ${errorBody}`);
+    }
+
+    const result = await response.json();
+
+    if (result.candidates && result.candidates[0]?.content?.parts?.[0]?.text) {
+        return result.candidates[0].content.parts[0].text;
+    }
+
+    throw new Error('Gemini APIから回答を取得できませんでした');
+}
+
+// --- OpenAI API ---
+async function callOpenAI(apiKey, base64, mimeType, prompt, model) {
+    const url = 'https://api.openai.com/v1/chat/completions';
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+            model: model,
+            messages: [{
+                role: 'user',
+                content: [
+                    { type: 'text', text: prompt },
+                    {
+                        type: 'image_url',
+                        image_url: {
+                            url: `data:${mimeType};base64,${base64}`
+                        }
+                    }
+                ]
+            }],
+            max_tokens: 1024
+        })
+    });
+
+    if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`OpenAI API error (${response.status}): ${errorBody}`);
+    }
+
+    const result = await response.json();
+
+    if (result.choices && result.choices[0]?.message?.content) {
+        return result.choices[0].message.content;
+    }
+
+    throw new Error('OpenAI APIから回答を取得できませんでした');
+}
+
+// ===========================================
+// カード追加
+// ===========================================
+
+async function addCard(message) {
+    const { deckName, modelName, frontImage, backImage, backText } = message;
+
     const front = frontImage || cardState.frontImage;
-    const back = backImage || cardState.backImage;
+    const backImg = backImage || cardState.backImage;
+    const backTxt = backText || cardState.backText;
 
     if (!front) {
         return { success: false, error: '問題の画像がありません' };
     }
 
+    if (!modelName) {
+        return { success: false, error: 'ノートタイプが指定されていません' };
+    }
+
     try {
-        // ファイル名を生成
         const timestamp = Date.now();
         const frontFilename = `anki_front_${timestamp}.png`;
-        const backFilename = back ? `anki_back_${timestamp}.png` : null;
 
-        // Base64データを抽出（data:image/png;base64,... → base64のみ）
         const frontBase64 = front.replace(/^data:image\/\w+;base64,/, '');
-        const backBase64 = back ? back.replace(/^data:image\/\w+;base64,/, '') : null;
 
-        // カードのフィールドと画像を設定
-        const fields = {
-            Front: `<img src="${frontFilename}">`,
-            Back: back ? `<img src="${backFilename}">` : ''
-        };
+        // モデルのフィールド名を取得
+        const fieldNames = await ankiConnectRequest('modelFieldNames', { modelName: modelName });
+        const frontField = fieldNames[0] || 'Front';
+        const backField = fieldNames[1] || 'Back';
 
+        // フィールドを構築
+        const fields = {};
+        fields[frontField] = '';
+
+        // 裏面: テキスト or 画像 or 空
+        if (backTxt) {
+            fields[backField] = backTxt;
+        } else {
+            fields[backField] = '';
+        }
+
+        // 画像設定
         const picture = [
             {
                 data: frontBase64,
                 filename: frontFilename,
-                fields: ['Front']
+                fields: [frontField]
             }
         ];
 
-        if (back && backBase64) {
+        // 裏面が画像の場合
+        if (backImg && !backTxt) {
+            const backFilename = `anki_back_${timestamp}.png`;
+            const backBase64 = backImg.replace(/^data:image\/\w+;base64,/, '');
             picture.push({
                 data: backBase64,
                 filename: backFilename,
-                fields: ['Back']
+                fields: [backField]
             });
         }
 
-        // AnkiConnectでカード追加
         const noteId = await ankiConnectRequest('addNote', {
             note: {
                 deckName: deckName,
-                modelName: 'Basic',
+                modelName: modelName,
                 fields: fields,
                 options: {
                     allowDuplicate: true
@@ -207,6 +330,7 @@ async function addCard(message) {
         // 状態をリセット
         cardState.frontImage = null;
         cardState.backImage = null;
+        cardState.backText = null;
         chrome.action.setBadgeText({ text: '' });
 
         return { success: true, noteId: noteId };
