@@ -1,0 +1,68 @@
+<!D OCTYPE html>
+    <html lang="ja">
+
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Anki Card Creator</title>
+        <link rel="stylesheet" href="popup.css">
+    </head>
+
+    <body>
+        <div class="container">
+            <header class="header">
+                <h1>Anki Card Creator</h1>
+                <div id="status-indicator" class="status-dot disconnected" title="AnkiConnect未接続"></div>
+            </header>
+
+            <!-- デッキ選択 -->
+            <section class="section">
+                <label for="deck-select" class="label">デッキ</label>
+                <select id="deck-select" class="select">
+                    <option value="">読み込み中...</option>
+                </select>
+            </section>
+
+            <!-- アクションボタン -->
+            <section class="section actions">
+                <button id="btn-question" class="btn btn-primary" disabled>
+                    <span class="btn-icon">📷</span>
+                    問題を追加
+                </button>
+                <button id="btn-answer" class="btn btn-secondary" disabled>
+                    <span class="btn-icon">📝</span>
+                    解説を追加
+                </button>
+            </section>
+
+            <!-- プレビュー -->
+            <section class="section previews">
+                <div class="preview-card">
+                    <div class="preview-label">問題（表面）</div>
+                    <div id="preview-front" class="preview-area">
+                        <span class="preview-placeholder">未選択</span>
+                    </div>
+                </div>
+                <div class="preview-card">
+                    <div class="preview-label">解説（裏面）</div>
+                    <div id="preview-back" class="preview-area">
+                        <span class="preview-placeholder">未選択</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 保存ボタン -->
+            <section class="section">
+                <button id="btn-save" class="btn btn-save" disabled>
+                    カードを保存
+                </button>
+            </section>
+
+            <!-- ステータスメッセージ -->
+            <div id="status-message" class="status-message"></div>
+        </div>
+
+        <script src="popup.js"></script>
+    </body>
+
+    </html>

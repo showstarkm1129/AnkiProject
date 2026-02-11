@@ -1,0 +1,5 @@
+# Helper scripts (not needed for the extension)
+create_icons.js
+create_icons.ps1
+generate_icons.js
+generate_icons.html
