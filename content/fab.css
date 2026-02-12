@@ -1,0 +1,130 @@
+/* ==========================================
+   Anki Card Creator — Floating Action Button
+   Shadow DOM内で使用するスタイル
+   ========================================== */
+
+:host {
+    all: initial;
+    position: fixed;
+    z-index: 2147483646;
+    font-family: 'Segoe UI', 'Meiryo', sans-serif;
+}
+
+/* ---- FAB Button ---- */
+.anki-fab {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    border: none;
+    cursor: grab;
+    background: linear-gradient(135deg, #5c6bc0, #7c4dff);
+    color: white;
+    font-size: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 16px rgba(124, 77, 255, 0.4), 0 2px 4px rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+}
+
+.anki-fab:hover {
+    transform: scale(1.08);
+    box-shadow: 0 6px 24px rgba(124, 77, 255, 0.5), 0 3px 8px rgba(0, 0, 0, 0.3);
+}
+
+.anki-fab:active {
+    cursor: grabbing;
+}
+
+.anki-fab.dragging {
+    opacity: 0.8;
+    transform: scale(1.12);
+    cursor: grabbing;
+    transition: none;
+}
+
+.anki-fab-icon {
+    width: 28px;
+    height: 28px;
+    pointer-events: none;
+}
+
+/* ---- Dropdown Menu ---- */
+.anki-fab-menu {
+    position: absolute;
+    bottom: 60px;
+    right: 0;
+    background: #1a1b2e;
+    border: 1px solid #3a3c5a;
+    border-radius: 12px;
+    padding: 6px;
+    min-width: 180px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    transform: translateY(8px) scale(0.95);
+    pointer-events: none;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.anki-fab-menu.open {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+}
+
+.anki-fab-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border: none;
+    background: none;
+    color: #e8e9f3;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    border-radius: 8px;
+    width: 100%;
+    transition: background 0.15s ease;
+    white-space: nowrap;
+}
+
+.anki-fab-menu-item:hover {
+    background: rgba(92, 107, 192, 0.2);
+}
+
+.anki-fab-menu-item:active {
+    background: rgba(124, 77, 255, 0.3);
+}
+
+.anki-fab-menu-icon {
+    font-size: 16px;
+    width: 20px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.anki-fab-menu-divider {
+    height: 1px;
+    background: #3a3c5a;
+    margin: 4px 8px;
+}
+
+/* ---- Badge (カード状態表示) ---- */
+.anki-fab-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    background: #66bb6a;
+    color: white;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 5px;
+    border-radius: 8px;
+    line-height: 1;
+    pointer-events: none;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}

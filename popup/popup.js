@@ -10,9 +10,10 @@ let frontImageData = null;
 let backImageData = null;
 let backTextData = null;
 let aiModeEnabled = false;
+let collapsedDecks = {};  // { deckFullName: true/false }
 
 // --- DOM Elements ---
-const deckSelect = document.getElementById('deck-select');
+const deckTree = document.getElementById('deck-tree');
 const modelSelect = document.getElementById('model-select');
 const btnQuestion = document.getElementById('btn-question');
 const btnAnswer = document.getElementById('btn-answer');
@@ -56,7 +57,7 @@ async function init() {
         if (deckResponse.success && modelResponse.success) {
             statusIndicator.className = 'status-dot connected';
             statusIndicator.title = 'AnkiConnect接続済み';
-            populateDeckSelect(deckResponse.data);
+            populateDeckTree(deckResponse.data);
             populateModelSelect(modelResponse.data);
             enableButtons();
             showStatus('接続完了！', 'success');
@@ -127,7 +128,6 @@ async function init() {
     } catch (e) { /* ignore */ }
 
     // 4. Event listeners
-    deckSelect.addEventListener('change', onDeckChange);
     modelSelect.addEventListener('change', onModelChange);
     btnQuestion.addEventListener('click', () => startCapture('front'));
     btnAnswer.addEventListener('click', () => startCapture('back'));
@@ -205,27 +205,178 @@ function saveCustomInstruction() {
     chrome.storage.local.set({ customInstruction: customInstruction.value });
 }
 
-// --- Deck Selection ---
-function populateDeckSelect(decks) {
-    deckSelect.innerHTML = '<option value="">デッキを選択...</option>';
-    decks.sort().forEach(deck => {
-        const option = document.createElement('option');
-        option.value = deck;
-        option.textContent = deck;
-        deckSelect.appendChild(option);
+// --- Deck Tree ---
+
+/**
+ * フラットなデッキ名リスト ("A::B::C") をツリー構造に変換
+ */
+function buildDeckTree(deckNames) {
+    const root = { children: {} };
+    deckNames.sort().forEach(fullName => {
+        const parts = fullName.split('::');
+        let node = root;
+        parts.forEach((part, i) => {
+            if (!node.children[part]) {
+                node.children[part] = {
+                    name: part,
+                    fullName: parts.slice(0, i + 1).join('::'),
+                    children: {}
+                };
+            }
+            node = node.children[part];
+        });
     });
-    chrome.storage.local.get('lastDeck', (result) => {
-        if (result.lastDeck && decks.includes(result.lastDeck)) {
-            deckSelect.value = result.lastDeck;
-            currentDeck = result.lastDeck;
-            updateSaveButton();
+    return root;
+}
+
+/**
+ * ツリー構造をDOMに描画
+ */
+function populateDeckTree(deckNames) {
+    deckTree.innerHTML = '';
+
+    if (!deckNames || deckNames.length === 0) {
+        deckTree.innerHTML = '<div class="deck-tree-loading">デッキがありません</div>';
+        return;
+    }
+
+    // 保存済みの開閉状態を復元してから描画
+    chrome.storage.local.get(['lastDeck', 'collapsedDecks'], (result) => {
+        if (result.collapsedDecks) {
+            collapsedDecks = result.collapsedDecks;
+        }
+
+        const tree = buildDeckTree(deckNames);
+        const fragment = document.createDocumentFragment();
+
+        Object.values(tree.children).forEach(child => {
+            renderDeckNode(child, fragment, 0);
+        });
+
+        deckTree.innerHTML = '';
+        deckTree.appendChild(fragment);
+
+        // 最後に選択したデッキを復元
+        if (result.lastDeck && deckNames.includes(result.lastDeck)) {
+            selectDeck(result.lastDeck, false);
+            // 親デッキを自動展開
+            expandParents(result.lastDeck);
         }
     });
 }
 
-function onDeckChange() {
-    currentDeck = deckSelect.value;
-    if (currentDeck) chrome.storage.local.set({ lastDeck: currentDeck });
+/**
+ * 選択中デッキの親を自動展開
+ */
+function expandParents(fullName) {
+    const parts = fullName.split('::');
+    for (let i = 1; i < parts.length; i++) {
+        const parentName = parts.slice(0, i).join('::');
+        const childContainer = deckTree.querySelector(`[data-deck-children="${CSS.escape(parentName)}"]`);
+        if (childContainer && childContainer.classList.contains('collapsed')) {
+            childContainer.classList.remove('collapsed');
+            // トグルアイコンも更新
+            const toggle = deckTree.querySelector(`[data-deck-toggle="${CSS.escape(parentName)}"]`);
+            if (toggle) toggle.textContent = '−';
+            collapsedDecks[parentName] = false;
+        }
+    }
+    chrome.storage.local.set({ collapsedDecks });
+}
+
+/**
+ * 再帰的にデッキノードをDOMに描画
+ */
+function renderDeckNode(node, container, depth) {
+    const hasChildren = Object.keys(node.children).length > 0;
+    // デフォルトは折りたたみ。明示的に false の場合のみ展開
+    const isCollapsed = collapsedDecks[node.fullName] !== false;
+
+    // 行
+    const row = document.createElement('div');
+    row.className = 'deck-row';
+    row.dataset.deck = node.fullName;
+    row.style.paddingLeft = (8 + depth * 16) + 'px';
+
+    // トグルボタン
+    const toggle = document.createElement('span');
+    toggle.className = 'deck-toggle ' + (hasChildren ? 'has-children' : 'no-children');
+    if (hasChildren) {
+        toggle.textContent = isCollapsed ? '+' : '−';
+        toggle.dataset.deckToggle = node.fullName;
+        toggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleDeck(node.fullName);
+        });
+    }
+    row.appendChild(toggle);
+
+    // デッキ名
+    const nameEl = document.createElement('span');
+    nameEl.className = 'deck-name';
+    nameEl.textContent = node.name;
+    row.appendChild(nameEl);
+
+    // 行クリックでデッキ選択
+    row.addEventListener('click', () => {
+        selectDeck(node.fullName, true);
+    });
+
+    container.appendChild(row);
+
+    // 子デッキコンテナ
+    if (hasChildren) {
+        const childContainer = document.createElement('div');
+        childContainer.className = 'deck-children' + (isCollapsed ? ' collapsed' : '');
+        childContainer.dataset.deckChildren = node.fullName;
+
+        Object.values(node.children).forEach(child => {
+            renderDeckNode(child, childContainer, depth + 1);
+        });
+
+        container.appendChild(childContainer);
+    }
+}
+
+/**
+ * デッキの開閉を切り替え
+ */
+function toggleDeck(fullName) {
+    const childContainer = deckTree.querySelector(`[data-deck-children="${CSS.escape(fullName)}"]`);
+    const toggle = deckTree.querySelector(`[data-deck-toggle="${CSS.escape(fullName)}"]`);
+    if (!childContainer) return;
+
+    const isCollapsed = childContainer.classList.contains('collapsed');
+
+    if (isCollapsed) {
+        // 展開
+        childContainer.classList.remove('collapsed');
+        if (toggle) toggle.textContent = '−';
+        collapsedDecks[fullName] = false;
+    } else {
+        // 折りたたみ
+        childContainer.classList.add('collapsed');
+        if (toggle) toggle.textContent = '+';
+        collapsedDecks[fullName] = true;
+    }
+
+    chrome.storage.local.set({ collapsedDecks });
+}
+
+/**
+ * デッキを選択
+ */
+function selectDeck(fullName, save) {
+    // 前の選択を解除
+    const prev = deckTree.querySelector('.deck-row.selected');
+    if (prev) prev.classList.remove('selected');
+
+    // 新しい選択をハイライト
+    const row = deckTree.querySelector(`[data-deck="${CSS.escape(fullName)}"]`);
+    if (row) row.classList.add('selected');
+
+    currentDeck = fullName;
+    if (save) chrome.storage.local.set({ lastDeck: currentDeck });
     updateSaveButton();
 }
 

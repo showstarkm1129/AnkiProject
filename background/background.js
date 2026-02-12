@@ -48,6 +48,9 @@ async function handleMessage(message, sender) {
         case 'getState':
             return { success: true, cardState: cardState };
 
+        case 'openPopup':
+            return await openPopupWindow();
+
         default:
             return { success: false, error: `Unknown action: ${message.action}` };
     }
@@ -76,6 +79,23 @@ async function ankiConnectRequest(action, params = {}) {
     }
 
     return result.result;
+}
+
+// --- ポップアップウィンドウを開く ---
+async function openPopupWindow() {
+    try {
+        const popupUrl = chrome.runtime.getURL('popup/popup.html');
+        await chrome.windows.create({
+            url: popupUrl,
+            type: 'popup',
+            width: 380,
+            height: 620,
+            focused: true
+        });
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
 }
 
 // --- デッキ一覧取得 ---

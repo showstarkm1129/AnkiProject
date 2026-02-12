@@ -39,9 +39,18 @@
         return true;
     });
 
+    // --- FABからのカスタムイベント受信 ---
+    window.addEventListener('anki-start-selection', (e) => {
+        currentSide = e.detail.side;
+        cleanup();
+        beginSelection();
+    });
+
     // --- 範囲選択の開始 ---
     function beginSelection() {
         removeExistingOverlay();
+        // FABを一時的に非表示
+        window.dispatchEvent(new CustomEvent('anki-fab-visibility', { detail: { visible: false } }));
 
         overlay = document.createElement('div');
         overlay.id = 'anki-capture-overlay';
@@ -247,5 +256,7 @@
         if (instructionLabel) { instructionLabel.remove(); instructionLabel = null; }
 
         isSelecting = false;
+        // FABを再表示
+        window.dispatchEvent(new CustomEvent('anki-fab-visibility', { detail: { visible: true } }));
     }
 })();
