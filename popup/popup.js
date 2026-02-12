@@ -44,6 +44,9 @@ const DEFAULT_MODELS = {
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', init);
 
+// ウィンドウがフォーカスされた時にカード状態を再読み込み
+window.addEventListener('focus', loadCardState);
+
 async function init() {
     showStatus('AnkiConnectに接続中...', 'info');
 
@@ -102,30 +105,7 @@ async function init() {
     );
 
     // 3. カード状態を復元
-    try {
-        const stateResponse = await chrome.runtime.sendMessage({ action: 'getState' });
-        if (stateResponse.success && stateResponse.cardState) {
-            const { frontImage, backImage, backText } = stateResponse.cardState;
-            if (frontImage) {
-                frontImageData = frontImage;
-                updatePreviewImage(previewFront, frontImage);
-                btnQuestion.classList.add('captured');
-            }
-            if (backImage) {
-                backImageData = backImage;
-                updatePreviewImage(previewBack, backImage);
-                btnAnswer.classList.add('captured');
-            }
-            if (backText) {
-                backTextData = backText;
-                updatePreviewText(previewBack, backText);
-                btnAnswer.classList.add('captured');
-            }
-            if (frontImage || backImage || backText) {
-                showStatus('前回のキャプチャを復元しました', 'success');
-            }
-        }
-    } catch (e) { /* ignore */ }
+    await loadCardState();
 
     // 4. Event listeners
     modelSelect.addEventListener('change', onModelChange);
@@ -142,6 +122,55 @@ async function init() {
     btnClearBack.addEventListener('click', clearBack);
 
     updateSaveButton();
+}
+
+// --- Load Card State ---
+async function loadCardState() {
+    try {
+        const stateResponse = await chrome.runtime.sendMessage({ action: 'getState' });
+        if (stateResponse.success && stateResponse.cardState) {
+            const { frontImage, backImage, backText } = stateResponse.cardState;
+            
+            // 前面画像を復元
+            if (frontImage) {
+                frontImageData = frontImage;
+                updatePreviewImage(previewFront, frontImage);
+                btnQuestion.classList.add('captured');
+            } else if (frontImageData) {
+                // データがない場合はクリア
+                frontImageData = null;
+                previewFront.innerHTML = '<span class="preview-placeholder">📷 問題を追加</span>';
+                btnQuestion.classList.remove('captured');
+            }
+            
+            // 背面画像または解説テキストを復元
+            if (backImage) {
+                backImageData = backImage;
+                backTextData = null;
+                updatePreviewImage(previewBack, backImage);
+                btnAnswer.classList.add('captured');
+            } else if (backText) {
+                backTextData = backText;
+                backImageData = null;
+                updatePreviewText(previewBack, backText);
+                btnAnswer.classList.add('captured');
+            } else if (backImageData || backTextData) {
+                // データがない場合はクリア
+                backImageData = null;
+                backTextData = null;
+                previewBack.innerHTML = '<span class="preview-placeholder">📝 解説を追加</span>';
+                btnAnswer.classList.remove('captured');
+            }
+            
+            if (frontImage || backImage || backText) {
+                showStatus('前回のキャプチャを復元しました', 'success');
+            }
+            
+            updateSaveButton();
+        }
+    } catch (e) {
+        console.error('Failed to load card state:', e);
+    }
 }
 
 // --- AI Mode ---
@@ -417,7 +446,10 @@ async function startCapture(side) {
 
     showStatus(`${side === 'front' ? '問題' : '解説'}の範囲を選択してください...`, 'info');
 
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    // ポップアップウィンドウから開いた場合も対応するため、通常ウィンドウのアクティブタブを取得
+    const tabs = await chrome.tabs.query({ active: true, windowType: 'normal' });
+    const tab = tabs[0];
+    
     if (!tab) { showStatus('アクティブなタブがありません', 'error'); return; }
 
     try {
