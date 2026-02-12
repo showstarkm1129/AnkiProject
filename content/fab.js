@@ -268,6 +268,7 @@
                 startCapture('back');
                 break;
             case 'popup':
+<<<<<<< HEAD
                 const width = 380;
                 const height = 620;
 
@@ -302,6 +303,18 @@
 
                 // ウィンドウを開く
                 window.open(url, 'AnkiCardCreatorPopup', `width=${width},height=${height},left=${left},top=${top}`);
+=======
+                // エラーハンドリングを追加（拡張機能再読み込み時のコンテキスト無効化対策）
+                try {
+                    chrome.runtime.sendMessage({ action: 'openPopup' }).catch(err => {
+                        console.error('Failed to open popup:', err);
+                        alert('拡張機能が再読み込みされました。ページをリロードしてください。');
+                    });
+                } catch (err) {
+                    console.error('Extension context invalidated:', err);
+                    alert('拡張機能が再読み込みされました。ページをリロードしてください。');
+                }
+>>>>>>> 1f112216c178c475e3e4727e2131127f3f2675f9
                 break;
             case 'hide':
                 fabHost.style.display = 'none';
@@ -311,10 +324,15 @@
 
     // --- キャプチャ開始 ---
     function startCapture(side) {
-        // content.js に選択開始を伝える（同一ページ内なのでカスタムイベント使用）
-        window.dispatchEvent(new CustomEvent('anki-start-selection', {
-            detail: { side: side }
-        }));
+        // content.js に選択開始を伝える（グローバル関数経由で直接呼び出し）
+        if (window.__ankiStartSelection) {
+            window.__ankiStartSelection(side);
+        } else {
+            // FallBack: カスタムイベント（互換性のため）
+            window.dispatchEvent(new CustomEvent('anki-start-selection', {
+                detail: { side: side }
+            }));
+        }
     }
 
     // --- 外部クリックでメニューを閉じる ---

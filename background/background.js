@@ -12,6 +12,9 @@ let cardState = {
     backText: null
 };
 
+// --- ポップアップウィンドウID追跡 ---
+let popupWindowId = null;
+
 // --- メッセージハンドラ ---
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // offscreen用メッセージは無視
@@ -81,6 +84,55 @@ async function ankiConnectRequest(action, params = {}) {
     return result.result;
 }
 
+<<<<<<< HEAD
+=======
+// --- ポップアップウィンドウを開く ---
+async function openPopupWindow() {
+    try {
+        const popupUrl = chrome.runtime.getURL('popup/popup.html');
+        
+        // 既存のポップアップウィンドウを探す
+        const allWindows = await chrome.windows.getAll({ populate: true });
+        
+        for (const win of allWindows) {
+            // ポップアップタイプのウィンドウのみ確認
+            if (win.type === 'popup' && win.tabs && win.tabs.length > 0) {
+                const tabUrl = win.tabs[0].url;
+                // URLにpopup.htmlが含まれているかチェック
+                if (tabUrl && (tabUrl.includes('popup/popup.html') || tabUrl.endsWith('popup.html'))) {
+                    // 既存のポップアップが見つかったらフォーカス
+                    await chrome.windows.update(win.id, { focused: true });
+                    popupWindowId = win.id;
+                    return { success: true, reused: true };
+                }
+            }
+        }
+        
+        // 既存のポップアップがない場合は新しく作成
+        const window = await chrome.windows.create({
+            url: popupUrl,
+            type: 'popup',
+            width: 380,
+            height: 620,
+            focused: true
+        });
+        
+        popupWindowId = window.id;
+        return { success: true, reused: false };
+    } catch (error) {
+        console.error('Error opening popup window:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// --- ウィンドウが閉じられた時にIDをクリア ---
+chrome.windows.onRemoved.addListener((windowId) => {
+    if (windowId === popupWindowId) {
+        popupWindowId = null;
+    }
+});
+
+>>>>>>> 1f112216c178c475e3e4727e2131127f3f2675f9
 // --- デッキ一覧取得 ---
 async function getDeckNames() {
     try {
