@@ -23,9 +23,17 @@
     let offsetY = 0;
     let hasMoved = false;
     let menuOpen = false;
+    let myTabId = null;
 
     // --- 初期化 ---
     function init() {
+        // Tab IDを取得
+        chrome.runtime.sendMessage({ action: 'getTabId' }, (response) => {
+            if (response && response.success) {
+                myTabId = response.tabId;
+            }
+        });
+
         createFab();
         restorePosition();
         addEventListeners();
@@ -260,7 +268,40 @@
                 startCapture('back');
                 break;
             case 'popup':
-                chrome.runtime.sendMessage({ action: 'openPopup' });
+                const width = 380;
+                const height = 620;
+
+                // FABの位置（Viewport座標）
+                // fabX, fabY はFABの左上座標
+
+                // スクリーン座標の概算
+                // window.screenX/Y はウィンドウの左上。
+                // ブラウザのUI（タブバー等）の高さを考慮してViewportの開始位置を推定
+                const chromeHeight = window.outerHeight - window.innerHeight;
+                const screenLeft = window.screenX;
+                const screenTop = window.screenY + chromeHeight;
+
+                // 基本: FABの左側に表示、下揃え
+                let left = screenLeft + fabX - width - 10;
+                let top = screenTop + fabY + 56 - height;
+
+                // 水平位置の調整
+                if (fabX < window.innerWidth / 2) {
+                    // FABが左側にある場合 → ポップアップを右側に表示
+                    left = screenLeft + fabX + 70; // FAB幅(約56) + マージン
+                }
+
+                // 垂直位置の調整
+                if (fabY < window.innerHeight / 2) {
+                    // FABが上側にある場合 → ポップアップを上揃え
+                    top = screenTop + fabY;
+                }
+
+                // URL構築
+                const url = chrome.runtime.getURL(myTabId ? `popup/popup.html?tabId=${myTabId}` : 'popup/popup.html');
+
+                // ウィンドウを開く
+                window.open(url, 'AnkiCardCreatorPopup', `width=${width},height=${height},left=${left},top=${top}`);
                 break;
             case 'hide':
                 fabHost.style.display = 'none';

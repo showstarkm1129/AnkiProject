@@ -46,6 +46,10 @@ const DEFAULT_MODELS = {
 };
 
 // --- Initialization ---
+const urlParams = new URLSearchParams(window.location.search);
+const paramTabId = urlParams.get('tabId');
+let targetTabId = paramTabId ? parseInt(paramTabId) : null;
+
 document.addEventListener('DOMContentLoaded', init);
 
 async function init() {
@@ -495,18 +499,51 @@ async function startCapture(side) {
 
     showStatus(`${side === 'front' ? '問題' : '解説'}の範囲を選択してください...`, 'info');
 
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab) { showStatus('アクティブなタブがありません', 'error'); return; }
+    showStatus(`${side === 'front' ? '問題' : '解説'}の範囲を選択してください...`, 'info');
+
+    // ポップアップを一時的に最小化（キャプチャ等の邪魔にならないように）
+    try {
+        const currentWindow = await chrome.windows.getCurrent();
+        await chrome.windows.update(currentWindow.id, { state: 'minimized' });
+    } catch (e) { console.error(e); }
+
+    let tabId = targetTabId;
+    if (!tabId) {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab) tabId = tab.id;
+    }
+
+    if (!tabId) { showStatus('アクティブなタブがありません', 'error'); return; }
 
     try {
         await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
+            target: { tabId: tabId },
             files: ['content/content.js']
         });
     } catch (e) { /* already injected */ }
 
-    chrome.tabs.sendMessage(tab.id, { action: 'startSelection', side: side });
+    chrome.tabs.sendMessage(tabId, { action: 'startSelection', side: side });
 }
+
+// --- Message Listener for Restore ---
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === 'captureComplete') {
+        // キャプチャ完了時にウィンドウを復元・フォーカス
+        chrome.windows.getCurrent((window) => {
+            if (window) {
+                chrome.windows.update(window.id, { focused: true, state: 'normal' });
+            }
+        });
+
+        // 状態更新
+        if (message.side === 'front') {
+            // 必要な処理があれば（initで同期されるので基本不要だがUX向上用）
+            showStatus('問題をキャプチャしました', 'success');
+        } else {
+            showStatus('解説をキャプチャしました', 'success');
+        }
+    }
+});
 
 // --- AI Explanation ---
 async function generateAiExplanation() {

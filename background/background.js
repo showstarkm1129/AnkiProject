@@ -48,8 +48,8 @@ async function handleMessage(message, sender) {
         case 'getState':
             return { success: true, cardState: cardState };
 
-        case 'openPopup':
-            return await openPopupWindow();
+        case 'getTabId':
+            return { success: true, tabId: sender.tab.id };
 
         default:
             return { success: false, error: `Unknown action: ${message.action}` };
@@ -79,23 +79,6 @@ async function ankiConnectRequest(action, params = {}) {
     }
 
     return result.result;
-}
-
-// --- ポップアップウィンドウを開く ---
-async function openPopupWindow() {
-    try {
-        const popupUrl = chrome.runtime.getURL('popup/popup.html');
-        await chrome.windows.create({
-            url: popupUrl,
-            type: 'popup',
-            width: 380,
-            height: 620,
-            focused: true
-        });
-        return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
 }
 
 // --- デッキ一覧取得 ---
@@ -151,6 +134,9 @@ function storeImage(message) {
                 : '';
     chrome.action.setBadgeText({ text: badgeText });
     chrome.action.setBadgeBackgroundColor({ color: '#66bb6a' });
+
+    // ポップアップ等に完了を通知
+    chrome.runtime.sendMessage({ action: 'captureComplete', side: side }).catch(() => { });
 
     return { success: true };
 }

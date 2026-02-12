@@ -723,9 +723,15 @@ body {
 }
 
 /* Global Scrollbar */
+/* Global Scrollbar */
+html {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color) transparent;
+}
+
 ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -733,11 +739,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-    background: var(--border-color);
-    border-radius: 3px;
-    transition: var(--transition);
+    background-color: var(--border-color);
+    border-radius: 4px;
+    border: 2px solid var(--bg-primary);
+    /* create padding effect */
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: var(--text-secondary);
+    background-color: var(--text-secondary);
 }

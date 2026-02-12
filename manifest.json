@@ -46,6 +46,14 @@
             "matches": [
                 "<all_urls>"
             ]
+        },
+        {
+            "resources": [
+                "popup/popup.html"
+            ],
+            "matches": [
+                "<all_urls>"
+            ]
         }
     ],
     "icons": {
