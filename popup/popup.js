@@ -37,6 +37,7 @@ const btnSaveApi = document.getElementById('btn-save-api');
 const apiStatus = document.getElementById('api-status');
 const customInstruction = document.getElementById('custom-instruction');
 
+
 // --- デフォルトモデル名 ---
 const DEFAULT_MODELS = {
     gemini: 'gemini-2.5-flash',
@@ -119,6 +120,13 @@ async function init() {
         if (result.customInstruction) {
             customInstruction.value = result.customInstruction;
         }
+
+        // FAB表示設定
+        if (result.fabVisible !== undefined) {
+            fabVisibleToggle.checked = result.fabVisible;
+        } else {
+            fabVisibleToggle.checked = true; // Default ON
+        }
     });
 
     // 3. カード状態を復元
@@ -174,7 +182,7 @@ async function loadCardState() {
         const stateResponse = await chrome.runtime.sendMessage({ action: 'getState' });
         if (stateResponse.success && stateResponse.cardState) {
             const { frontImage, backImage, backText } = stateResponse.cardState;
-            
+
             // 前面画像を復元
             if (frontImage) {
                 frontImageData = frontImage;
@@ -186,7 +194,7 @@ async function loadCardState() {
                 previewFront.innerHTML = '<span class="preview-placeholder">📷 問題を追加</span>';
                 btnQuestion.classList.remove('captured');
             }
-            
+
             // 背面画像または解説テキストを復元
             if (backImage) {
                 backImageData = backImage;
@@ -205,11 +213,11 @@ async function loadCardState() {
                 previewBack.innerHTML = '<span class="preview-placeholder">📝 解説を追加</span>';
                 btnAnswer.classList.remove('captured');
             }
-            
+
             if (frontImage || backImage || backText) {
                 showStatus('前回のキャプチャを復元しました', 'success');
             }
-            
+
             updateSaveButton();
         }
     } catch (e) {
@@ -306,6 +314,8 @@ function saveLlmModel() {
 function saveCustomInstruction() {
     chrome.storage.local.set({ customInstruction: customInstruction.value });
 }
+
+
 
 // --- Deck Tree ---
 
@@ -528,14 +538,7 @@ async function startCapture(side) {
 
     showStatus(`${side === 'front' ? '問題' : '解説'}の範囲を選択してください...`, 'info');
 
-<<<<<<< HEAD
     showStatus(`${side === 'front' ? '問題' : '解説'}の範囲を選択してください...`, 'info');
-
-    // ポップアップを一時的に最小化（キャプチャ等の邪魔にならないように）
-    try {
-        const currentWindow = await chrome.windows.getCurrent();
-        await chrome.windows.update(currentWindow.id, { state: 'minimized' });
-    } catch (e) { console.error(e); }
 
     let tabId = targetTabId;
     if (!tabId) {
@@ -544,13 +547,6 @@ async function startCapture(side) {
     }
 
     if (!tabId) { showStatus('アクティブなタブがありません', 'error'); return; }
-=======
-    // ポップアップウィンドウから開いた場合も対応するため、通常ウィンドウのアクティブタブを取得
-    const tabs = await chrome.tabs.query({ active: true, windowType: 'normal' });
-    const tab = tabs[0];
-    
-    if (!tab) { showStatus('アクティブなタブがありません', 'error'); return; }
->>>>>>> 1f112216c178c475e3e4727e2131127f3f2675f9
 
     try {
         await chrome.scripting.executeScript({
@@ -562,25 +558,7 @@ async function startCapture(side) {
     chrome.tabs.sendMessage(tabId, { action: 'startSelection', side: side });
 }
 
-// --- Message Listener for Restore ---
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === 'captureComplete') {
-        // キャプチャ完了時にウィンドウを復元・フォーカス
-        chrome.windows.getCurrent((window) => {
-            if (window) {
-                chrome.windows.update(window.id, { focused: true, state: 'normal' });
-            }
-        });
 
-        // 状態更新
-        if (message.side === 'front') {
-            // 必要な処理があれば（initで同期されるので基本不要だがUX向上用）
-            showStatus('問題をキャプチャしました', 'success');
-        } else {
-            showStatus('解説をキャプチャしました', 'success');
-        }
-    }
-});
 
 // --- AI Explanation ---
 async function generateAiExplanation() {

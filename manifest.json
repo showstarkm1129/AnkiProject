@@ -34,28 +34,9 @@
                 "<all_urls>"
             ],
             "js": [
-                "content/content.js",
-                "content/fab.js"
+                "content/content.js"
             ],
             "run_at": "document_idle"
-        }
-    ],
-    "web_accessible_resources": [
-        {
-            "resources": [
-                "content/fab.css"
-            ],
-            "matches": [
-                "<all_urls>"
-            ]
-        },
-        {
-            "resources": [
-                "popup/popup.html"
-            ],
-            "matches": [
-                "<all_urls>"
-            ]
         }
     ],
     "icons": {
