@@ -86,4 +86,4 @@ AnkiProject/
 ## Contribute
 
 - showstarkm1129 < 1%
-- Claude Opus 4.6 > 99%
+- LLM > 99%
