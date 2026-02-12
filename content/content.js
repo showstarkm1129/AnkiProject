@@ -46,6 +46,13 @@
         beginSelection();
     });
 
+    // --- FABからの直接呼び出し用グローバル関数 ---
+    window.__ankiStartSelection = function(side) {
+        currentSide = side;
+        cleanup();
+        beginSelection();
+    };
+
     // --- 範囲選択の開始 ---
     function beginSelection() {
         removeExistingOverlay();
