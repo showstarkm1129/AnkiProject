@@ -206,6 +206,21 @@ body {
     background: #8e6aff;
 }
 
+.btn-icon-only {
+    background: none;
+    border: none;
+    font-size: 14px;
+    padding: 4px;
+    cursor: pointer;
+    transition: var(--transition);
+    opacity: 0.7;
+}
+
+.btn-icon-only:hover {
+    opacity: 1;
+    transform: scale(1.1);
+}
+
 .api-status {
     font-size: 10px;
     min-height: 14px;
@@ -368,6 +383,54 @@ body {
     border-radius: 4px;
 }
 
+/* Deck Tree Dropdown */
+.deck-select-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+#deck-select-display {
+    cursor: pointer;
+    background-color: var(--bg-card);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 8px 12px;
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 13px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#deck-select-display::after {
+    content: '▼';
+    font-size: 10px;
+    opacity: 0.7;
+}
+
+.deck-tree-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    width: 100%;
+    max-height: 300px;
+    overflow-y: auto;
+    background-color: var(--bg-card);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+    z-index: 100;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.deck-tree-dropdown.hidden {
+    display: none;
+}
+
+.deck-tree {
+    padding: 4px 0;
+}
+
 .deck-tree-loading {
     padding: 8px 12px;
     color: var(--text-secondary);
@@ -377,21 +440,24 @@ body {
 .deck-row {
     display: flex;
     align-items: center;
-    padding: 5px 8px;
+    padding: 6px 8px;
     cursor: pointer;
-    transition: background 0.15s ease;
-    user-select: none;
     border-radius: 4px;
+    transition: background 0.2s;
+    user-select: none;
     margin: 1px 4px;
+    color: var(--text-secondary);
+    /* デフォルト色 */
 }
 
 .deck-row:hover {
-    background: rgba(92, 107, 192, 0.12);
+    background-color: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
 }
 
 .deck-row.selected {
-    background: rgba(124, 77, 255, 0.2);
-    box-shadow: inset 3px 0 0 var(--accent-purple);
+    background-color: var(--accent-primary);
+    color: white;
 }
 
 .deck-toggle {
@@ -654,4 +720,24 @@ body {
     50% {
         opacity: 0.6;
     }
+}
+
+/* Global Scrollbar */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 3px;
+    transition: var(--transition);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-secondary);
 }

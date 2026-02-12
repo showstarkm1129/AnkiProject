@@ -178,7 +178,7 @@ async function generateExplanation(message) {
     if (customInstruction) {
         systemPrompt += `\n\nユーザーからの指示: ${customInstruction}`;
     }
-    systemPrompt += '\n\nHTMLの記述で出力して';
+    systemPrompt += '\n\nHTMLの記述で簡潔に出力して';
 
     try {
         let text;
@@ -186,6 +186,8 @@ async function generateExplanation(message) {
             text = await callGemini(apiKey, base64, mimeType, systemPrompt, llmModel || 'gemini-2.5-flash');
         } else if (provider === 'openai') {
             text = await callOpenAI(apiKey, base64, mimeType, systemPrompt, llmModel || 'gpt-4o-mini');
+        } else if (provider === 'openrouter') {
+            text = await callOpenRouter(apiKey, base64, mimeType, systemPrompt, llmModel || 'deepseek/deepseek-chat');
         } else {
             return { success: false, error: `未対応のAPI: ${provider}` };
         }
@@ -235,12 +237,28 @@ async function callGemini(apiKey, base64, mimeType, prompt, model) {
 // --- OpenAI API ---
 async function callOpenAI(apiKey, base64, mimeType, prompt, model) {
     const url = 'https://api.openai.com/v1/chat/completions';
+    return await callOpenAICompatible(url, apiKey, base64, mimeType, prompt, model);
+}
 
+// --- OpenRouter API (OpenAI Compatible) ---
+async function callOpenRouter(apiKey, base64, mimeType, prompt, model) {
+    const url = 'https://openrouter.ai/api/v1/chat/completions';
+    // OpenRouter requires Referer header for rankings (optional but recommended)
+    const headers = {
+        'HTTP-Referer': 'https://github.com/showstarkm1129/AnkiProject',
+        'X-Title': 'Anki Card Creator'
+    };
+    return await callOpenAICompatible(url, apiKey, base64, mimeType, prompt, model, headers);
+}
+
+// --- Common OpenAI Compatible Handler ---
+async function callOpenAICompatible(url, apiKey, base64, mimeType, prompt, model, extraHeaders = {}) {
     const response = await fetch(url, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
+            'Authorization': `Bearer ${apiKey}`,
+            ...extraHeaders
         },
         body: JSON.stringify({
             model: model,
@@ -262,7 +280,7 @@ async function callOpenAI(apiKey, base64, mimeType, prompt, model) {
 
     if (!response.ok) {
         const errorBody = await response.text();
-        throw new Error(`OpenAI API error (${response.status}): ${errorBody}`);
+        throw new Error(`API error (${response.status}): ${errorBody}`);
     }
 
     const result = await response.json();
@@ -271,7 +289,96 @@ async function callOpenAI(apiKey, base64, mimeType, prompt, model) {
         return result.choices[0].message.content;
     }
 
-    throw new Error('OpenAI APIから回答を取得できませんでした');
+    throw new Error('APIから回答を取得できませんでした');
+}
+
+// --- Anthropic API ---
+async function callAnthropic(apiKey, base64, mimeType, prompt, model) {
+    const url = 'https://api.anthropic.com/v1/messages';
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'content-type': 'application/json',
+            'dangerously-allow-browser': 'true'
+        },
+        body: JSON.stringify({
+            model: model,
+            max_tokens: 1024,
+            messages: [{
+                role: 'user',
+                content: [
+                    {
+                        type: 'image',
+                        source: {
+                            type: 'base64',
+                            media_type: mimeType,
+                            data: base64
+                        }
+                    },
+                    { type: 'text', text: prompt }
+                ]
+            }]
+        })
+    });
+
+    if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`Anthropic API error (${response.status}): ${errorBody}`);
+    }
+
+    const result = await response.json();
+
+    if (result.content && result.content[0]?.text) {
+        return result.content[0].text;
+    }
+
+    throw new Error('Anthropic APIから回答を取得できませんでした');
+}
+
+// --- OpenRouter API ---
+async function callOpenRouter(apiKey, base64, mimeType, prompt, model) {
+    const url = 'https://openrouter.ai/api/v1/chat/completions';
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            // 'HTTP-Referer': 'https://github.com/your-repo', // Optional
+            // 'X-Title': 'Anki Card Creator' // Optional
+        },
+        body: JSON.stringify({
+            model: model,
+            messages: [{
+                role: 'user',
+                content: [
+                    { type: 'text', text: prompt },
+                    {
+                        type: 'image_url',
+                        image_url: {
+                            url: `data:${mimeType};base64,${base64}`
+                        }
+                    }
+                ]
+            }]
+        })
+    });
+
+    if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`OpenRouter API error (${response.status}): ${errorBody}`);
+    }
+
+    const result = await response.json();
+
+    if (result.choices && result.choices[0]?.message?.content) {
+        return result.choices[0].message.content;
+    }
+
+    throw new Error('OpenRouter APIから回答を取得できませんでした');
 }
 
 // ===========================================

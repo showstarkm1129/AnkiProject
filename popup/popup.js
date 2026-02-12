@@ -13,6 +13,8 @@ let aiModeEnabled = false;
 let collapsedDecks = {};  // { deckFullName: true/false }
 
 // --- DOM Elements ---
+const deckSelectDisplay = document.getElementById('deck-select-display');
+const deckTreeContainer = document.getElementById('deck-tree-container');
 const deckTree = document.getElementById('deck-tree');
 const modelSelect = document.getElementById('model-select');
 const btnQuestion = document.getElementById('btn-question');
@@ -38,7 +40,9 @@ const customInstruction = document.getElementById('custom-instruction');
 // --- デフォルトモデル名 ---
 const DEFAULT_MODELS = {
     gemini: 'gemini-2.5-flash',
-    openai: 'gpt-4o-mini'
+    openai: 'gpt-4o-mini',
+    anthropic: 'claude-3-5-sonnet-20241022',
+    openrouter: 'deepseek/deepseek-chat'
 };
 
 // --- Initialization ---
@@ -69,37 +73,46 @@ async function init() {
         showStatus('AnkiConnectに接続できません。Ankiを起動してください。', 'error');
     }
 
-    // 2. 保存済み設定を復元
-    chrome.storage.local.get(
-        ['apiProvider', 'apiKey', 'llmModel', 'aiMode', 'customInstruction'],
-        (result) => {
-            if (result.apiProvider) apiProvider.value = result.apiProvider;
+    // 2. 保存済み設定を復元 & マイグレーション
+    chrome.storage.local.get(null, (result) => {
+        const provider = result.apiProvider || 'gemini';
+        apiProvider.value = provider;
 
-            // モデル名: 保存済みがあればそれ、なければデフォルト
-            const provider = result.apiProvider || 'gemini';
-            llmModelInput.value = result.llmModel || DEFAULT_MODELS[provider] || '';
-
-            if (result.apiKey) {
-                apiKeyInput.value = result.apiKey;
-                apiStatus.textContent = '✓ APIキー保存済み';
-                apiStatus.className = 'api-status saved';
-            } else {
-                apiStatus.textContent = 'APIキー未設定';
-                apiStatus.className = 'api-status missing';
-            }
-
-            if (result.aiMode) {
-                aiModeEnabled = true;
-                aiModeToggle.checked = true;
-                aiSettings.classList.remove('hidden');
-                updateAnswerButton();
-            }
-
-            if (result.customInstruction) {
-                customInstruction.value = result.customInstruction;
-            }
+        // モデル名: プロバイダーごとの保存値があればそれ、なければデフォルト
+        // 旧形式 (llmModel) が残っていて、かつプロバイダー別のがない場合は移行
+        let currentModel = result[`llmModel_${provider}`];
+        if (!currentModel && result.llmModel) {
+            // 簡易移行: 現在のプロバイダーに割り当てる
+            currentModel = result.llmModel;
+            const migrationData = {};
+            migrationData[`llmModel_${provider}`] = currentModel;
+            chrome.storage.local.set(migrationData);
+            chrome.storage.local.remove('llmModel');
         }
-    );
+        llmModelInput.value = currentModel || DEFAULT_MODELS[provider] || '';
+
+        // APIキーの取得とマイグレーション
+        let currentKey = result[`apiKey_${provider}`];
+        if (!currentKey && result.apiKey) {
+            currentKey = result.apiKey;
+            const migrationData = {};
+            migrationData[`apiKey_${provider}`] = currentKey;
+            chrome.storage.local.set(migrationData);
+            chrome.storage.local.remove('apiKey');
+        }
+        showApiKeyStatus(currentKey);
+
+        if (result.aiMode) {
+            aiModeEnabled = true;
+            aiModeToggle.checked = true;
+            aiSettings.classList.remove('hidden');
+            updateAnswerButton();
+        }
+
+        if (result.customInstruction) {
+            customInstruction.value = result.customInstruction;
+        }
+    });
 
     // 3. カード状態を復元
     try {
@@ -141,6 +154,33 @@ async function init() {
     btnClearFront.addEventListener('click', clearFront);
     btnClearBack.addEventListener('click', clearBack);
 
+    // APIキー表示切替
+    const btnToggleKey = document.getElementById('btn-toggle-key');
+    if (btnToggleKey) {
+        btnToggleKey.addEventListener('click', () => {
+            const type = apiKeyInput.type === 'password' ? 'text' : 'password';
+            apiKeyInput.type = type;
+            btnToggleKey.textContent = type === 'password' ? '👁️' : '🔒';
+        });
+    }
+
+    // Deck Dropdown Toggle
+    if (deckSelectDisplay) {
+        deckSelectDisplay.addEventListener('click', (e) => {
+            e.stopPropagation();
+            deckTreeContainer.classList.toggle('hidden');
+        });
+    }
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (deckSelectDisplay && deckTreeContainer &&
+            !deckSelectDisplay.contains(e.target) &&
+            !deckTreeContainer.contains(e.target)) {
+            deckTreeContainer.classList.add('hidden');
+        }
+    });
+
     updateSaveButton();
 }
 
@@ -161,15 +201,38 @@ function onProviderChange() {
     const provider = apiProvider.value;
     chrome.storage.local.set({ apiProvider: provider });
 
+    // APIキー表示切替
+    const keyName = `apiKey_${provider}`;
+    chrome.storage.local.get([keyName], (result) => {
+        const key = result[keyName];
+        showApiKeyStatus(key);
+    });
+
     // モデル名のプレースホルダーを更新
     llmModelInput.placeholder = DEFAULT_MODELS[provider] || '';
 
-    // モデル名がデフォルトのままだったら新プロバイダーのデフォルトに切替
-    const currentVal = llmModelInput.value;
-    const isDefault = !currentVal || Object.values(DEFAULT_MODELS).includes(currentVal);
-    if (isDefault) {
-        llmModelInput.value = DEFAULT_MODELS[provider] || '';
-        chrome.storage.local.set({ llmModel: llmModelInput.value });
+    // モデル名読み込み
+    const modelKeyName = `llmModel_${provider}`;
+    chrome.storage.local.get([modelKeyName], (result) => {
+        const savedModel = result[modelKeyName];
+        // 保存値があればそれ、なければデフォルト
+        llmModelInput.value = savedModel || DEFAULT_MODELS[provider] || '';
+        if (!savedModel) {
+            // デフォルト値を保存しておく
+            saveLlmModel();
+        }
+    });
+}
+
+function showApiKeyStatus(key) {
+    if (key) {
+        apiKeyInput.value = key;
+        apiStatus.textContent = '✓ APIキー保存済み';
+        apiStatus.className = 'api-status saved';
+    } else {
+        apiKeyInput.value = '';
+        apiStatus.textContent = 'APIキー未設定';
+        apiStatus.className = 'api-status missing';
     }
 }
 
@@ -182,23 +245,29 @@ function updateAnswerButton() {
 }
 
 function saveApiSettings() {
+    const provider = apiProvider.value;
     const key = apiKeyInput.value.trim();
     if (!key) {
         apiStatus.textContent = '⚠ APIキーを入力してください';
         apiStatus.className = 'api-status missing';
         return;
     }
-    chrome.storage.local.set({
-        apiProvider: apiProvider.value,
-        apiKey: key
-    }, () => {
+
+    const saveData = {};
+    saveData[`apiKey_${provider}`] = key;
+    saveData['apiProvider'] = provider;
+
+    chrome.storage.local.set(saveData, () => {
         apiStatus.textContent = '✓ 保存しました';
         apiStatus.className = 'api-status saved';
     });
 }
 
 function saveLlmModel() {
-    chrome.storage.local.set({ llmModel: llmModelInput.value });
+    const provider = apiProvider.value;
+    const saveData = {};
+    saveData[`llmModel_${provider}`] = llmModelInput.value;
+    chrome.storage.local.set(saveData);
 }
 
 function saveCustomInstruction() {
@@ -376,6 +445,15 @@ function selectDeck(fullName, save) {
     if (row) row.classList.add('selected');
 
     currentDeck = fullName;
+
+    // update display text (dropdown style)
+    if (deckSelectDisplay) {
+        deckSelectDisplay.textContent = fullName;
+        deckSelectDisplay.classList.add('selected'); // style hint
+        // close dropdown
+        deckTreeContainer.classList.add('hidden');
+    }
+
     if (save) chrome.storage.local.set({ lastDeck: currentDeck });
     updateSaveButton();
 }
@@ -437,8 +515,14 @@ async function generateAiExplanation() {
         return;
     }
 
-    const settings = await chrome.storage.local.get(['apiProvider', 'apiKey', 'llmModel']);
-    if (!settings.apiKey) {
+    const tempSettings = await chrome.storage.local.get(['apiProvider', 'llmModel']);
+    const provider = tempSettings.apiProvider || 'gemini';
+    const keyName = `apiKey_${provider}`;
+
+    const settings = await chrome.storage.local.get([keyName]);
+    const apiKey = settings[keyName];
+
+    if (!apiKey) {
         showStatus('⚙️ APIキーを設定してください', 'error');
         return;
     }
@@ -450,9 +534,9 @@ async function generateAiExplanation() {
         const response = await chrome.runtime.sendMessage({
             action: 'generateExplanation',
             imageData: frontImageData,
-            provider: settings.apiProvider || 'gemini',
-            apiKey: settings.apiKey,
-            llmModel: settings.llmModel || DEFAULT_MODELS[settings.apiProvider || 'gemini'],
+            provider: provider,
+            apiKey: apiKey,
+            llmModel: tempSettings.llmModel || DEFAULT_MODELS[provider],
             customInstruction: customInstruction.value || ''
         });
 

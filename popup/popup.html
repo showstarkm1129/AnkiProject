@@ -36,6 +36,8 @@
                     <select id="api-provider" class="select-small">
                         <option value="gemini">Gemini</option>
                         <option value="openai">OpenAI</option>
+                        <option value="anthropic">Anthropic</option>
+                        <option value="openrouter">OpenRouter</option>
                     </select>
                 </div>
                 <div class="settings-row">
@@ -46,6 +48,7 @@
                     <label for="api-key" class="label-inline">APIキー</label>
                     <div class="input-row">
                         <input id="api-key" type="password" class="input-small" placeholder="キーを入力...">
+                        <button id="btn-toggle-key" class="btn-icon-only" title="表示/非表示">👁️</button>
                         <button id="btn-save-api" class="btn btn-tiny">保存</button>
                     </div>
                 </div>
@@ -58,8 +61,13 @@
         <!-- デッキ選択 -->
         <section class="section">
             <label class="label">デッキ</label>
-            <div id="deck-tree" class="deck-tree">
-                <div class="deck-tree-loading">読み込み中...</div>
+            <div class="deck-select-wrapper">
+                <div id="deck-select-display" class="select">デッキを選択...</div>
+                <div id="deck-tree-container" class="deck-tree-dropdown hidden">
+                    <div id="deck-tree" class="deck-tree">
+                        <div class="deck-tree-loading">読み込み中...</div>
+                    </div>
+                </div>
             </div>
         </section>
 
