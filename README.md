@@ -47,7 +47,7 @@ AnkiConnectが正しく動作しているか確認するために、ポート番
 **お手持ちのAPIキーを適応する必要があります。**
 
 以下にGeminiでのセットアップ例を記載します。
-1. **Google Ai Studio** にログインします。https://aistudio.google.com/?project=gen-lang-client-0947852434　//後でURL短くする
+1. **Google AI Studio** にログインします。 --> [Google AI Studio](https://aistudio.google.com/?project=gen-lang-client-0947852434)
 2. **Get API Key** にアクセスする。
 3. 適当なプロジェクトを作成し、APIキーを発行する。(Ankiなど識別できるようにしておくことを推奨)
 4. 不規則な文字列で構成された「キー」をコピーし、本ツールの「APIキー」を入力する部分にペーストします。
