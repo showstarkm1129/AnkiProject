@@ -6,8 +6,8 @@
 // --- State ---
 let currentDeck = '';
 let currentModel = '';
-let frontImageData = null;
-let backImageData = null;
+let frontImages = [];
+let backImages = [];
 let backTextData = null;
 let aiModeEnabled = false;
 let collapsedDecks = {};  // { deckFullName: true/false }
@@ -181,40 +181,42 @@ async function loadCardState() {
     try {
         const stateResponse = await chrome.runtime.sendMessage({ action: 'getState' });
         if (stateResponse.success && stateResponse.cardState) {
-            const { frontImage, backImage, backText } = stateResponse.cardState;
+            const { frontImages: fi, backImages: bi, backText } = stateResponse.cardState;
 
             // 前面画像を復元
-            if (frontImage) {
-                frontImageData = frontImage;
-                updatePreviewImage(previewFront, frontImage);
+            if (fi && fi.length > 0) {
+                frontImages = [...fi];
+                renderThumbnails(previewFront, frontImages, 'front');
                 btnQuestion.classList.add('captured');
-            } else if (frontImageData) {
-                // データがない場合はクリア
-                frontImageData = null;
-                previewFront.innerHTML = '<span class="preview-placeholder">📷 問題を追加</span>';
+            } else if (frontImages.length > 0) {
+                frontImages = [];
+                renderThumbnails(previewFront, frontImages, 'front');
                 btnQuestion.classList.remove('captured');
             }
 
-            // 背面画像または解説テキストを復元
-            if (backImage) {
-                backImageData = backImage;
-                backTextData = null;
-                updatePreviewImage(previewBack, backImage);
-                btnAnswer.classList.add('captured');
-            } else if (backText) {
+            // 背面画像・テキストを復元
+            if (bi && bi.length > 0) {
+                backImages = [...bi];
+            } else {
+                backImages = [];
+            }
+            if (backText) {
                 backTextData = backText;
-                backImageData = null;
-                updatePreviewText(previewBack, backText);
-                btnAnswer.classList.add('captured');
-            } else if (backImageData || backTextData) {
-                // データがない場合はクリア
-                backImageData = null;
+            } else {
                 backTextData = null;
-                previewBack.innerHTML = '<span class="preview-placeholder">📝 解説を追加</span>';
+            }
+
+            if (bi && bi.length > 0 || backText) {
+                renderBackPreview();
+                btnAnswer.classList.add('captured');
+            } else if (backImages.length > 0 || backTextData) {
+                backImages = [];
+                backTextData = null;
+                renderBackPreview();
                 btnAnswer.classList.remove('captured');
             }
 
-            if (frontImage || backImage || backText) {
+            if ((fi && fi.length > 0) || (bi && bi.length > 0) || backText) {
                 showStatus('前回のキャプチャを復元しました', 'success');
             }
 
@@ -562,7 +564,7 @@ async function startCapture(side) {
 
 // --- AI Explanation ---
 async function generateAiExplanation() {
-    if (!frontImageData) {
+    if (frontImages.length === 0) {
         showStatus('先に問題をキャプチャしてください', 'error');
         return;
     }
@@ -575,17 +577,17 @@ async function generateAiExplanation() {
     const apiKey = settings[keyName];
 
     if (!apiKey) {
-        showStatus('⚙️ APIキーを設定してください', 'error');
+        showStatus('APIキーを設定してください', 'error');
         return;
     }
 
-    showStatus('🤖 AI解説を生成中...', 'info');
+    showStatus('AI解説を生成中...', 'info');
     btnAnswer.disabled = true;
 
     try {
         const response = await chrome.runtime.sendMessage({
             action: 'generateExplanation',
-            imageData: frontImageData,
+            imageData: frontImages[0],
             provider: provider,
             apiKey: apiKey,
             llmModel: tempSettings.llmModel || DEFAULT_MODELS[provider],
@@ -594,8 +596,7 @@ async function generateAiExplanation() {
 
         if (response.success) {
             backTextData = response.text;
-            backImageData = null;
-            updatePreviewText(previewBack, response.text);
+            renderBackPreview();
             btnAnswer.classList.add('captured');
 
             await chrome.runtime.sendMessage({
@@ -604,7 +605,7 @@ async function generateAiExplanation() {
                 imageData: response.text
             });
 
-            showStatus('✨ AI解説を生成しました！', 'success');
+            showStatus('AI解説を生成しました', 'success');
         } else {
             throw new Error(response.error);
         }
@@ -617,33 +618,144 @@ async function generateAiExplanation() {
 }
 
 // --- Preview ---
-function updatePreviewImage(previewEl, imageData) {
+function renderThumbnails(previewEl, images, side) {
     previewEl.innerHTML = '';
-    previewEl.classList.remove('has-text');
-    const img = document.createElement('img');
-    img.src = imageData;
-    img.alt = 'キャプチャ画像';
-    previewEl.appendChild(img);
+    previewEl.classList.remove('has-text', 'has-image');
+
+    if (images.length === 0) {
+        previewEl.innerHTML = '<span class="preview-placeholder">未選択</span>';
+        previewEl.classList.add('empty');
+        if (side === 'front') {
+            btnClearFront.classList.add('hidden');
+            document.getElementById('front-count').classList.add('hidden');
+        }
+        if (side === 'back') {
+            btnClearBack.classList.add('hidden');
+            document.getElementById('back-count').classList.add('hidden');
+        }
+        return;
+    }
+
     previewEl.classList.add('has-image');
-    // クリアボタンを表示
-    if (previewEl.id === 'preview-front') btnClearFront.classList.remove('hidden');
-    if (previewEl.id === 'preview-back') btnClearBack.classList.remove('hidden');
+    previewEl.classList.remove('empty');
+
+    images.forEach((imgData, index) => {
+        const item = document.createElement('div');
+        item.className = 'thumbnail-item';
+
+        const img = document.createElement('img');
+        img.src = imgData;
+        img.alt = `キャプチャ ${index + 1}`;
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'thumbnail-remove';
+        removeBtn.textContent = '✕';
+        removeBtn.title = '削除';
+        removeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            removeImageAt(side, index);
+        });
+
+        item.appendChild(img);
+        item.appendChild(removeBtn);
+        previewEl.appendChild(item);
+    });
+
+    if (side === 'front') {
+        btnClearFront.classList.remove('hidden');
+        const countEl = document.getElementById('front-count');
+        countEl.textContent = `(${images.length})`;
+        countEl.classList.remove('hidden');
+    }
+    if (side === 'back') {
+        btnClearBack.classList.remove('hidden');
+        const countEl = document.getElementById('back-count');
+        countEl.textContent = `(${images.length})`;
+        countEl.classList.remove('hidden');
+    }
 }
 
-function updatePreviewText(previewEl, text) {
-    previewEl.innerHTML = '';
-    previewEl.classList.remove('has-image');
-    const p = document.createElement('div');
-    p.className = 'preview-text';
-    p.textContent = text;
-    previewEl.appendChild(p);
-    previewEl.classList.add('has-text');
-    if (previewEl.id === 'preview-back') btnClearBack.classList.remove('hidden');
+function renderBackPreview() {
+    previewBack.innerHTML = '';
+    previewBack.classList.remove('has-image', 'has-text', 'empty');
+
+    if (!backTextData && backImages.length === 0) {
+        previewBack.innerHTML = '<span class="preview-placeholder">未選択</span>';
+        previewBack.classList.add('empty');
+        btnClearBack.classList.add('hidden');
+        document.getElementById('back-count').classList.add('hidden');
+        return;
+    }
+
+    // テキスト表示
+    if (backTextData) {
+        const textDiv = document.createElement('div');
+        textDiv.className = 'preview-text';
+        textDiv.textContent = backTextData;
+        previewBack.appendChild(textDiv);
+        previewBack.classList.add('has-text');
+    }
+
+    // サムネイル表示
+    if (backImages.length > 0) {
+        const strip = document.createElement('div');
+        strip.className = 'thumbnail-inner-strip';
+        backImages.forEach((imgData, index) => {
+            const item = document.createElement('div');
+            item.className = 'thumbnail-item';
+
+            const img = document.createElement('img');
+            img.src = imgData;
+            img.alt = `キャプチャ ${index + 1}`;
+
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'thumbnail-remove';
+            removeBtn.textContent = '✕';
+            removeBtn.title = '削除';
+            removeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                removeImageAt('back', index);
+            });
+
+            item.appendChild(img);
+            item.appendChild(removeBtn);
+            strip.appendChild(item);
+        });
+        previewBack.appendChild(strip);
+        previewBack.classList.add('has-image');
+    }
+
+    btnClearBack.classList.remove('hidden');
+    const countEl = document.getElementById('back-count');
+    const totalItems = (backTextData ? 1 : 0) + backImages.length;
+    countEl.textContent = `(${totalItems})`;
+    countEl.classList.remove('hidden');
+}
+
+async function removeImageAt(side, index) {
+    if (side === 'front') {
+        frontImages.splice(index, 1);
+        renderThumbnails(previewFront, frontImages, 'front');
+        if (frontImages.length === 0) btnQuestion.classList.remove('captured');
+    } else if (side === 'back') {
+        backImages.splice(index, 1);
+        renderBackPreview();
+        if (backImages.length === 0 && !backTextData) btnAnswer.classList.remove('captured');
+    }
+
+    await chrome.runtime.sendMessage({
+        action: 'removeImage',
+        side: side,
+        index: index
+    });
+
+    updateSaveButton();
+    showStatus('画像を削除しました', 'info');
 }
 
 // --- Save Card ---
 async function saveCard() {
-    if (!currentDeck || !currentModel || !frontImageData) {
+    if (!currentDeck || !currentModel || frontImages.length === 0) {
         showStatus('デッキ、ノートタイプ、問題の画像が必要です', 'error');
         return;
     }
@@ -656,13 +768,13 @@ async function saveCard() {
             action: 'addCard',
             deckName: currentDeck,
             modelName: currentModel,
-            frontImage: frontImageData,
-            backImage: backImageData,
+            frontImages: frontImages,
+            backImages: backImages,
             backText: backTextData
         });
 
         if (response.success) {
-            showStatus('カードを保存しました！ 🎉', 'success');
+            showStatus('カードを保存しました', 'success');
             resetCard();
         } else {
             throw new Error(response.error);
@@ -675,24 +787,19 @@ async function saveCard() {
 
 // --- Clear ---
 function clearFront() {
-    frontImageData = null;
-    previewFront.innerHTML = '<span class="preview-placeholder">未選択</span>';
-    previewFront.classList.remove('has-image');
+    frontImages = [];
+    renderThumbnails(previewFront, frontImages, 'front');
     btnQuestion.classList.remove('captured');
-    btnClearFront.classList.add('hidden');
     chrome.runtime.sendMessage({ action: 'storeImage', side: 'front', imageData: null });
     updateSaveButton();
     showStatus('問題をクリアしました', 'info');
 }
 
 function clearBack() {
-    backImageData = null;
+    backImages = [];
     backTextData = null;
-    previewBack.innerHTML = '<span class="preview-placeholder">未選択</span>';
-    previewBack.classList.remove('has-image');
-    previewBack.classList.remove('has-text');
+    renderBackPreview();
     btnAnswer.classList.remove('captured');
-    btnClearBack.classList.add('hidden');
     chrome.runtime.sendMessage({ action: 'storeImage', side: 'back', imageData: null });
     chrome.runtime.sendMessage({ action: 'storeImage', side: 'backText', imageData: null });
     updateSaveButton();
@@ -701,20 +808,15 @@ function clearBack() {
 
 // --- Reset ---
 function resetCard() {
-    frontImageData = null;
-    backImageData = null;
+    frontImages = [];
+    backImages = [];
     backTextData = null;
 
-    previewFront.innerHTML = '<span class="preview-placeholder">未選択</span>';
-    previewFront.classList.remove('has-image');
-    previewBack.innerHTML = '<span class="preview-placeholder">未選択</span>';
-    previewBack.classList.remove('has-image');
-    previewBack.classList.remove('has-text');
+    renderThumbnails(previewFront, frontImages, 'front');
+    renderBackPreview();
 
     btnQuestion.classList.remove('captured');
     btnAnswer.classList.remove('captured');
-    btnClearFront.classList.add('hidden');
-    btnClearBack.classList.add('hidden');
     updateSaveButton();
 
     setTimeout(() => showStatus('次のカードを追加できます', 'success'), 2000);
@@ -727,7 +829,7 @@ function enableButtons() {
 }
 
 function updateSaveButton() {
-    btnSave.disabled = !(currentDeck && currentModel && frontImageData);
+    btnSave.disabled = !(currentDeck && currentModel && frontImages.length > 0);
 }
 
 function showStatus(text, type) {

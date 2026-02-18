@@ -7,8 +7,8 @@ const ANKI_CONNECT_URL = 'http://localhost:8765';
 
 // --- 現在のカードの状態 ---
 let cardState = {
-    frontImage: null,
-    backImage: null,
+    frontImages: [],
+    backImages: [],
     backText: null
 };
 
@@ -40,6 +40,9 @@ async function handleMessage(message, sender) {
 
         case 'storeImage':
             return storeImage(message);
+
+        case 'removeImage':
+            return removeImage(message);
 
         case 'addCard':
             return await addCard(message);
@@ -117,27 +120,51 @@ function storeImage(message) {
     const { side, imageData } = message;
 
     if (side === 'front') {
-        cardState.frontImage = imageData;
+        if (imageData === null) {
+            cardState.frontImages = [];
+        } else {
+            cardState.frontImages.push(imageData);
+        }
     } else if (side === 'backText') {
-        cardState.backText = imageData; // テキストとして保存
-        cardState.backImage = null;
-    } else {
-        cardState.backImage = imageData;
-        cardState.backText = null;
+        cardState.backText = imageData;
+    } else if (side === 'back') {
+        if (imageData === null) {
+            cardState.backImages = [];
+        } else {
+            cardState.backImages.push(imageData);
+        }
     }
 
-    // バッジ更新
-    const hasBack = cardState.backImage || cardState.backText;
-    const badgeText = (cardState.frontImage && hasBack) ? 'QA'
-        : cardState.frontImage ? 'Q'
+    updateBadge();
+    return { success: true };
+}
+
+// --- 個別画像削除 ---
+function removeImage(message) {
+    const { side, index } = message;
+    if (side === 'front') {
+        if (index >= 0 && index < cardState.frontImages.length) {
+            cardState.frontImages.splice(index, 1);
+        }
+    } else if (side === 'back') {
+        if (index >= 0 && index < cardState.backImages.length) {
+            cardState.backImages.splice(index, 1);
+        }
+    }
+    updateBadge();
+    return { success: true };
+}
+
+// --- バッジ更新 ---
+function updateBadge() {
+    const hasFront = cardState.frontImages.length > 0;
+    const hasBack = cardState.backImages.length > 0 || cardState.backText;
+    const badgeText = (hasFront && hasBack) ? 'QA'
+        : hasFront ? 'Q'
             : hasBack ? 'A'
                 : '';
     chrome.action.setBadgeText({ text: badgeText });
     chrome.action.setBadgeBackgroundColor({ color: '#66bb6a' });
-
-
-
-    return { success: true };
 }
 
 // ===========================================
@@ -371,13 +398,13 @@ async function callOpenRouter(apiKey, base64, mimeType, prompt, model) {
 // ===========================================
 
 async function addCard(message) {
-    const { deckName, modelName, frontImage, backImage, backText } = message;
+    const { deckName, modelName, frontImages: msgFrontImages, backImages: msgBackImages, backText } = message;
 
-    const front = frontImage || cardState.frontImage;
-    const backImg = backImage || cardState.backImage;
+    const frontImgs = msgFrontImages || cardState.frontImages;
+    const backImgs = msgBackImages || cardState.backImages;
     const backTxt = backText || cardState.backText;
 
-    if (!front) {
+    if (!frontImgs || frontImgs.length === 0) {
         return { success: false, error: '問題の画像がありません' };
     }
 
@@ -387,9 +414,6 @@ async function addCard(message) {
 
     try {
         const timestamp = Date.now();
-        const frontFilename = `anki_front_${timestamp}.png`;
-
-        const frontBase64 = front.replace(/^data:image\/\w+;base64,/, '');
 
         // モデルのフィールド名を取得
         const fieldNames = await ankiConnectRequest('modelFieldNames', { modelName: modelName });
@@ -399,31 +423,30 @@ async function addCard(message) {
         // フィールドを構築
         const fields = {};
         fields[frontField] = '';
-
-        // 裏面: テキスト or 画像 or 空
-        if (backTxt) {
-            fields[backField] = backTxt;
-        } else {
-            fields[backField] = '';
-        }
+        fields[backField] = backTxt || '';
 
         // 画像設定
-        const picture = [
-            {
-                data: frontBase64,
-                filename: frontFilename,
-                fields: [frontField]
-            }
-        ];
+        const picture = [];
 
-        // 裏面が画像の場合
-        if (backImg && !backTxt) {
-            const backFilename = `anki_back_${timestamp}.png`;
-            const backBase64 = backImg.replace(/^data:image\/\w+;base64,/, '');
+        // 表面画像（複数）
+        frontImgs.forEach((imgData, i) => {
+            const base64 = imgData.replace(/^data:image\/\w+;base64,/, '');
             picture.push({
-                data: backBase64,
-                filename: backFilename,
-                fields: [backField]
+                data: base64,
+                filename: `anki_front_${timestamp}_${i}.png`,
+                fields: [frontField]
+            });
+        });
+
+        // 裏面画像（複数）
+        if (backImgs && backImgs.length > 0) {
+            backImgs.forEach((imgData, i) => {
+                const base64 = imgData.replace(/^data:image\/\w+;base64,/, '');
+                picture.push({
+                    data: base64,
+                    filename: `anki_back_${timestamp}_${i}.png`,
+                    fields: [backField]
+                });
             });
         }
 
@@ -440,8 +463,8 @@ async function addCard(message) {
         });
 
         // 状態をリセット
-        cardState.frontImage = null;
-        cardState.backImage = null;
+        cardState.frontImages = [];
+        cardState.backImages = [];
         cardState.backText = null;
         chrome.action.setBadgeText({ text: '' });
 
