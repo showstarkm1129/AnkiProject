@@ -27,6 +27,9 @@ const statusMessage = document.getElementById('status-message');
 const btnClearFront = document.getElementById('btn-clear-front');
 const btnClearBack = document.getElementById('btn-clear-back');
 
+const frontTextInput = document.getElementById('front-text-input');
+const backTextInput = document.getElementById('back-text-input');
+
 // AI Settings
 const aiModeToggle = document.getElementById('ai-mode-toggle');
 const aiSettings = document.getElementById('ai-settings');
@@ -120,13 +123,6 @@ async function init() {
         if (result.customInstruction) {
             customInstruction.value = result.customInstruction;
         }
-
-        // FAB表示設定
-        if (result.fabVisible !== undefined) {
-            fabVisibleToggle.checked = result.fabVisible;
-        } else {
-            fabVisibleToggle.checked = true; // Default ON
-        }
     });
 
     // 3. カード状態を復元
@@ -145,6 +141,15 @@ async function init() {
     customInstruction.addEventListener('input', debounce(saveCustomInstruction, 500));
     btnClearFront.addEventListener('click', clearFront);
     btnClearBack.addEventListener('click', clearBack);
+
+    frontTextInput.addEventListener('input', debounce(() => {
+        chrome.runtime.sendMessage({ action: 'storeText', side: 'front', text: frontTextInput.value });
+        updateSaveButton();
+    }, 300));
+    backTextInput.addEventListener('input', debounce(() => {
+        chrome.runtime.sendMessage({ action: 'storeText', side: 'back', text: backTextInput.value });
+        updateSaveButton();
+    }, 300));
 
     // APIキー表示切替
     const btnToggleKey = document.getElementById('btn-toggle-key');
@@ -181,18 +186,23 @@ async function loadCardState() {
     try {
         const stateResponse = await chrome.runtime.sendMessage({ action: 'getState' });
         if (stateResponse.success && stateResponse.cardState) {
-            const { frontImage, backImage, backText } = stateResponse.cardState;
+            const { frontImage, backImage, backText, frontText, userBackText } = stateResponse.cardState;
 
             // 前面画像を復元
             if (frontImage) {
                 frontImageData = frontImage;
                 updatePreviewImage(previewFront, frontImage);
-                btnQuestion.classList.add('captured');
+                btnClearFront.classList.remove('hidden');
             } else if (frontImageData) {
-                // データがない場合はクリア
                 frontImageData = null;
-                previewFront.innerHTML = '<span class="preview-placeholder">📷 問題を追加</span>';
-                btnQuestion.classList.remove('captured');
+                previewFront.innerHTML = '';
+                previewFront.classList.add('hidden');
+                btnClearFront.classList.add('hidden');
+            }
+
+            // 前面テキストを復元
+            if (frontText) {
+                frontTextInput.value = frontText;
             }
 
             // 背面画像または解説テキストを復元
@@ -200,22 +210,28 @@ async function loadCardState() {
                 backImageData = backImage;
                 backTextData = null;
                 updatePreviewImage(previewBack, backImage);
-                btnAnswer.classList.add('captured');
+                btnClearBack.classList.remove('hidden');
             } else if (backText) {
                 backTextData = backText;
                 backImageData = null;
+                // AI生成テキストはプレビューに表示
                 updatePreviewText(previewBack, backText);
-                btnAnswer.classList.add('captured');
+                btnClearBack.classList.remove('hidden');
             } else if (backImageData || backTextData) {
-                // データがない場合はクリア
                 backImageData = null;
                 backTextData = null;
-                previewBack.innerHTML = '<span class="preview-placeholder">📝 解説を追加</span>';
-                btnAnswer.classList.remove('captured');
+                previewBack.innerHTML = '';
+                previewBack.classList.add('hidden');
+                btnClearBack.classList.add('hidden');
             }
 
-            if (frontImage || backImage || backText) {
-                showStatus('前回のキャプチャを復元しました', 'success');
+            // 裏面テキスト入力を復元
+            if (userBackText) {
+                backTextInput.value = userBackText;
+            }
+
+            if (frontImage || frontText || backImage || backText || userBackText) {
+                showStatus('前回の內容を復元しました', 'success');
             }
 
             updateSaveButton();
@@ -281,7 +297,7 @@ function updateAnswerButton() {
     if (aiModeEnabled) {
         btnAnswer.innerHTML = '<span class="btn-icon">🤖</span>AI解説を生成';
     } else {
-        btnAnswer.innerHTML = '<span class="btn-icon">📝</span>解説を追加';
+        btnAnswer.innerHTML = '<span class="btn-icon">📝</span>画像をキャプチャ';
     }
 }
 
@@ -562,10 +578,15 @@ async function startCapture(side) {
 
 // --- AI Explanation ---
 async function generateAiExplanation() {
-    if (!frontImageData) {
-        showStatus('先に問題をキャプチャしてください', 'error');
+    if (!frontImageData && !frontTextInput.value.trim()) {
+        showStatus('先に問題を入力またはキャプチャしてください', 'error');
         return;
     }
+    if (!frontImageData) {
+        showStatus('AI解説には問題の画像が必要です', 'error');
+        return;
+    }
+
 
     const tempSettings = await chrome.storage.local.get(['apiProvider', 'llmModel']);
     const provider = tempSettings.apiProvider || 'gemini';
@@ -619,7 +640,7 @@ async function generateAiExplanation() {
 // --- Preview ---
 function updatePreviewImage(previewEl, imageData) {
     previewEl.innerHTML = '';
-    previewEl.classList.remove('has-text');
+    previewEl.classList.remove('has-text', 'hidden');
     const img = document.createElement('img');
     img.src = imageData;
     img.alt = 'キャプチャ画像';
@@ -632,7 +653,7 @@ function updatePreviewImage(previewEl, imageData) {
 
 function updatePreviewText(previewEl, text) {
     previewEl.innerHTML = '';
-    previewEl.classList.remove('has-image');
+    previewEl.classList.remove('has-image', 'hidden');
     const p = document.createElement('div');
     p.className = 'preview-text';
     p.textContent = text;
@@ -643,13 +664,20 @@ function updatePreviewText(previewEl, text) {
 
 // --- Save Card ---
 async function saveCard() {
-    if (!currentDeck || !currentModel || !frontImageData) {
-        showStatus('デッキ、ノートタイプ、問題の画像が必要です', 'error');
+    const frontText = frontTextInput.value.trim();
+    const hasFront = !!(frontImageData || frontText);
+    const backTextVal = backTextInput.value.trim();
+
+    if (!currentDeck || !currentModel || !hasFront) {
+        showStatus('デッキ、ノートタイプ、問題の入力が必要です', 'error');
         return;
     }
 
     showStatus('カードを保存中...', 'info');
     btnSave.disabled = true;
+
+    // 裏面: テキスト入力値があればそれを優先、AI生成テキストはフォールバック
+    const resolvedBackText = backTextVal || backTextData || null;
 
     try {
         const response = await chrome.runtime.sendMessage({
@@ -657,8 +685,9 @@ async function saveCard() {
             deckName: currentDeck,
             modelName: currentModel,
             frontImage: frontImageData,
-            backImage: backImageData,
-            backText: backTextData
+            frontText: frontText || null,
+            backImage: (resolvedBackText ? null : backImageData),
+            backText: resolvedBackText
         });
 
         if (response.success) {
@@ -676,11 +705,12 @@ async function saveCard() {
 // --- Clear ---
 function clearFront() {
     frontImageData = null;
-    previewFront.innerHTML = '<span class="preview-placeholder">未選択</span>';
-    previewFront.classList.remove('has-image');
-    btnQuestion.classList.remove('captured');
+    previewFront.innerHTML = '';
+    previewFront.classList.add('hidden');
+    frontTextInput.value = '';
     btnClearFront.classList.add('hidden');
     chrome.runtime.sendMessage({ action: 'storeImage', side: 'front', imageData: null });
+    chrome.runtime.sendMessage({ action: 'storeText', side: 'front', text: '' });
     updateSaveButton();
     showStatus('問題をクリアしました', 'info');
 }
@@ -688,13 +718,13 @@ function clearFront() {
 function clearBack() {
     backImageData = null;
     backTextData = null;
-    previewBack.innerHTML = '<span class="preview-placeholder">未選択</span>';
-    previewBack.classList.remove('has-image');
-    previewBack.classList.remove('has-text');
-    btnAnswer.classList.remove('captured');
+    previewBack.innerHTML = '';
+    previewBack.classList.add('hidden');
+    backTextInput.value = '';
     btnClearBack.classList.add('hidden');
     chrome.runtime.sendMessage({ action: 'storeImage', side: 'back', imageData: null });
     chrome.runtime.sendMessage({ action: 'storeImage', side: 'backText', imageData: null });
+    chrome.runtime.sendMessage({ action: 'storeText', side: 'back', text: '' });
     updateSaveButton();
     showStatus('解説をクリアしました', 'info');
 }
@@ -705,18 +735,21 @@ function resetCard() {
     backImageData = null;
     backTextData = null;
 
-    previewFront.innerHTML = '<span class="preview-placeholder">未選択</span>';
-    previewFront.classList.remove('has-image');
-    previewBack.innerHTML = '<span class="preview-placeholder">未選択</span>';
-    previewBack.classList.remove('has-image');
-    previewBack.classList.remove('has-text');
+    previewFront.innerHTML = '';
+    previewFront.classList.add('hidden');
+    previewBack.innerHTML = '';
+    previewBack.classList.add('hidden');
+    frontTextInput.value = '';
+    backTextInput.value = '';
 
-    btnQuestion.classList.remove('captured');
-    btnAnswer.classList.remove('captured');
     btnClearFront.classList.add('hidden');
     btnClearBack.classList.add('hidden');
-    updateSaveButton();
 
+    // バックグラウンドの状態もリセット
+    chrome.runtime.sendMessage({ action: 'storeText', side: 'front', text: '' });
+    chrome.runtime.sendMessage({ action: 'storeText', side: 'back', text: '' });
+
+    updateSaveButton();
     setTimeout(() => showStatus('次のカードを追加できます', 'success'), 2000);
 }
 
@@ -727,7 +760,9 @@ function enableButtons() {
 }
 
 function updateSaveButton() {
-    btnSave.disabled = !(currentDeck && currentModel && frontImageData);
+    const frontText = frontTextInput ? frontTextInput.value.trim() : '';
+    const hasFront = !!(frontImageData || frontText);
+    btnSave.disabled = !(currentDeck && currentModel && hasFront);
 }
 
 function showStatus(text, type) {

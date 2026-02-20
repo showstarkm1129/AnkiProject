@@ -79,37 +79,38 @@
             </select>
         </section>
 
-        <!-- アクションボタン -->
-        <section class="section actions">
-            <button id="btn-question" class="btn btn-primary" disabled>
-                <span class="btn-icon">📷</span>
-                問題を追加
-            </button>
-            <button id="btn-answer" class="btn btn-secondary" disabled>
-                <span class="btn-icon">📝</span>
-                解説を追加
-            </button>
-        </section>
-
-        <!-- プレビュー -->
+        <!-- カード入力エリア -->
         <section class="section previews">
+            <!-- 問題（表面） -->
             <div class="preview-card">
                 <div class="preview-header">
                     <span class="preview-label">問題（表面）</span>
                     <button id="btn-clear-front" class="btn-clear hidden" title="クリア">✕</button>
                 </div>
-                <div id="preview-front" class="preview-area">
-                    <span class="preview-placeholder">未選択</span>
-                </div>
+                <!-- テキスト入力 -->
+                <textarea id="front-text-input" class="card-textarea" placeholder="テキストを入力（任意）..."></textarea>
+                <!-- 画像プレビュー -->
+                <div id="preview-front" class="preview-area hidden"></div>
+                <!-- 画像キャプチャボタン -->
+                <button id="btn-question" class="btn btn-primary btn-full" disabled>
+                    <span class="btn-icon">📷</span>画像をキャプチャ
+                </button>
             </div>
+
+            <!-- 解説（裏面） -->
             <div class="preview-card">
                 <div class="preview-header">
                     <span class="preview-label">解説（裏面）</span>
                     <button id="btn-clear-back" class="btn-clear hidden" title="クリア">✕</button>
                 </div>
-                <div id="preview-back" class="preview-area">
-                    <span class="preview-placeholder">未選択</span>
-                </div>
+                <!-- テキスト入力 -->
+                <textarea id="back-text-input" class="card-textarea" placeholder="テキストを入力（任意）..."></textarea>
+                <!-- 画像プレビュー -->
+                <div id="preview-back" class="preview-area hidden"></div>
+                <!-- 画像キャプチャボタン -->
+                <button id="btn-answer" class="btn btn-secondary btn-full" disabled>
+                    <span class="btn-icon">📝</span>画像をキャプチャ
+                </button>
             </div>
         </section>
 
