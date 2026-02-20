@@ -6,8 +6,8 @@
 // --- State ---
 let currentDeck = '';
 let currentModel = '';
-let frontImageData = null;
-let backImageData = null;
+let frontImages = [];
+let backImages = [];
 let backTextData = null;
 let aiModeEnabled = false;
 let collapsedDecks = {};  // { deckFullName: true/false }
@@ -186,52 +186,55 @@ async function loadCardState() {
     try {
         const stateResponse = await chrome.runtime.sendMessage({ action: 'getState' });
         if (stateResponse.success && stateResponse.cardState) {
-            const { frontImage, backImage, backText, frontText, userBackText } = stateResponse.cardState;
+            const { frontImages: fi, backImages: bi, backText, frontText, userBackText } = stateResponse.cardState;
 
             // 前面画像を復元
-            if (frontImage) {
-                frontImageData = frontImage;
-                updatePreviewImage(previewFront, frontImage);
-                btnClearFront.classList.remove('hidden');
-            } else if (frontImageData) {
-                frontImageData = null;
-                previewFront.innerHTML = '';
-                previewFront.classList.add('hidden');
-                btnClearFront.classList.add('hidden');
+            if (fi && fi.length > 0) {
+                frontImages = [...fi];
+                renderThumbnails(previewFront, frontImages, 'front');
+                btnQuestion.classList.add('captured');
+            } else {
+                frontImages = [];
+                previewFront.innerHTML = '<span class="preview-placeholder">未選択</span>';
+                previewFront.classList.add('empty');
+                btnQuestion.classList.remove('captured');
             }
 
             // 前面テキストを復元
             if (frontText) {
                 frontTextInput.value = frontText;
+            } else {
+                frontTextInput.value = '';
             }
 
-            // 背面画像または解説テキストを復元
-            if (backImage) {
-                backImageData = backImage;
-                backTextData = null;
-                updatePreviewImage(previewBack, backImage);
-                btnClearBack.classList.remove('hidden');
-            } else if (backText) {
+            // 背面画像・テキストを復元
+            if (bi && bi.length > 0) {
+                backImages = [...bi];
+            } else {
+                backImages = [];
+            }
+            if (backText) {
                 backTextData = backText;
-                backImageData = null;
-                // AI生成テキストはプレビューに表示
-                updatePreviewText(previewBack, backText);
-                btnClearBack.classList.remove('hidden');
-            } else if (backImageData || backTextData) {
-                backImageData = null;
+            } else {
                 backTextData = null;
-                previewBack.innerHTML = '';
-                previewBack.classList.add('hidden');
-                btnClearBack.classList.add('hidden');
+            }
+
+            renderBackPreview();
+            if ((bi && bi.length > 0) || backText) {
+                btnAnswer.classList.add('captured');
+            } else {
+                btnAnswer.classList.remove('captured');
             }
 
             // 裏面テキスト入力を復元
             if (userBackText) {
                 backTextInput.value = userBackText;
+            } else {
+                backTextInput.value = '';
             }
 
-            if (frontImage || frontText || backImage || backText || userBackText) {
-                showStatus('前回の內容を復元しました', 'success');
+            if ((fi && fi.length > 0) || (bi && bi.length > 0) || backText || frontText || userBackText) {
+                showStatus('前回の内容を復元しました', 'success');
             }
 
             updateSaveButton();
@@ -578,7 +581,7 @@ async function startCapture(side) {
 
 // --- AI Explanation ---
 async function generateAiExplanation() {
-    if (!frontImageData && !frontTextInput.value.trim()) {
+    if (frontImages.length === 0 && !frontTextInput.value.trim()) {
         showStatus('先に問題を入力またはキャプチャしてください', 'error');
         return;
     }
@@ -596,17 +599,17 @@ async function generateAiExplanation() {
     const apiKey = settings[keyName];
 
     if (!apiKey) {
-        showStatus('⚙️ APIキーを設定してください', 'error');
+        showStatus('APIキーを設定してください', 'error');
         return;
     }
 
-    showStatus('🤖 AI解説を生成中...', 'info');
+    showStatus('AI解説を生成中...', 'info');
     btnAnswer.disabled = true;
 
     try {
         const response = await chrome.runtime.sendMessage({
             action: 'generateExplanation',
-            imageData: frontImageData,
+            imageData: frontImages[0],
             provider: provider,
             apiKey: apiKey,
             llmModel: tempSettings.llmModel || DEFAULT_MODELS[provider],
@@ -615,8 +618,7 @@ async function generateAiExplanation() {
 
         if (response.success) {
             backTextData = response.text;
-            backImageData = null;
-            updatePreviewText(previewBack, response.text);
+            renderBackPreview();
             btnAnswer.classList.add('captured');
 
             await chrome.runtime.sendMessage({
@@ -625,7 +627,7 @@ async function generateAiExplanation() {
                 imageData: response.text
             });
 
-            showStatus('✨ AI解説を生成しました！', 'success');
+            showStatus('AI解説を生成しました', 'success');
         } else {
             throw new Error(response.error);
         }
@@ -638,38 +640,148 @@ async function generateAiExplanation() {
 }
 
 // --- Preview ---
-function updatePreviewImage(previewEl, imageData) {
+function renderThumbnails(previewEl, images, side) {
     previewEl.innerHTML = '';
-    previewEl.classList.remove('has-text', 'hidden');
-    const img = document.createElement('img');
-    img.src = imageData;
-    img.alt = 'キャプチャ画像';
-    previewEl.appendChild(img);
+    previewEl.classList.remove('has-text', 'has-image');
+
+    if (images.length === 0) {
+        previewEl.innerHTML = '<span class="preview-placeholder">未選択</span>';
+        previewEl.classList.add('empty');
+        if (side === 'front') {
+            btnClearFront.classList.add('hidden');
+            document.getElementById('front-count').classList.add('hidden');
+        }
+        if (side === 'back') {
+            btnClearBack.classList.add('hidden');
+            document.getElementById('back-count').classList.add('hidden');
+        }
+        return;
+    }
     previewEl.classList.add('has-image');
-    // クリアボタンを表示
-    if (previewEl.id === 'preview-front') btnClearFront.classList.remove('hidden');
-    if (previewEl.id === 'preview-back') btnClearBack.classList.remove('hidden');
+    previewEl.classList.remove('empty');
+
+    images.forEach((imgData, index) => {
+        const item = document.createElement('div');
+        item.className = 'thumbnail-item';
+
+        const img = document.createElement('img');
+        img.src = imgData;
+        img.alt = `キャプチャ ${index + 1}`;
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'thumbnail-remove';
+        removeBtn.textContent = '✕';
+        removeBtn.title = '削除';
+        removeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            removeImageAt(side, index);
+        });
+
+        item.appendChild(img);
+        item.appendChild(removeBtn);
+        previewEl.appendChild(item);
+    });
+
+    if (side === 'front') {
+        btnClearFront.classList.remove('hidden');
+        const countEl = document.getElementById('front-count');
+        countEl.textContent = `(${images.length})`;
+        countEl.classList.remove('hidden');
+    }
+    if (side === 'back') {
+        btnClearBack.classList.remove('hidden');
+        const countEl = document.getElementById('back-count');
+        countEl.textContent = `(${images.length})`;
+        countEl.classList.remove('hidden');
+    }
 }
 
-function updatePreviewText(previewEl, text) {
-    previewEl.innerHTML = '';
-    previewEl.classList.remove('has-image', 'hidden');
-    const p = document.createElement('div');
-    p.className = 'preview-text';
-    p.textContent = text;
-    previewEl.appendChild(p);
-    previewEl.classList.add('has-text');
-    if (previewEl.id === 'preview-back') btnClearBack.classList.remove('hidden');
+function renderBackPreview() {
+    previewBack.innerHTML = '';
+    previewBack.classList.remove('has-image', 'has-text', 'empty');
+
+    if (!backTextData && backImages.length === 0) {
+        previewBack.innerHTML = '<span class="preview-placeholder">未選択</span>';
+        previewBack.classList.add('empty');
+        btnClearBack.classList.add('hidden');
+        document.getElementById('back-count').classList.add('hidden');
+        return;
+    }
+
+    // テキスト表示
+    if (backTextData) {
+        const textDiv = document.createElement('div');
+        textDiv.className = 'preview-text';
+        textDiv.textContent = backTextData;
+        previewBack.appendChild(textDiv);
+        previewBack.classList.add('has-text');
+    }
+
+    // サムネイル表示
+    if (backImages.length > 0) {
+        const strip = document.createElement('div');
+        strip.className = 'thumbnail-inner-strip';
+        backImages.forEach((imgData, index) => {
+            const item = document.createElement('div');
+            item.className = 'thumbnail-item';
+
+            const img = document.createElement('img');
+            img.src = imgData;
+            img.alt = `キャプチャ ${index + 1}`;
+
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'thumbnail-remove';
+            removeBtn.textContent = '✕';
+            removeBtn.title = '削除';
+            removeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                removeImageAt('back', index);
+            });
+
+            item.appendChild(img);
+            item.appendChild(removeBtn);
+            strip.appendChild(item);
+        });
+        previewBack.appendChild(strip);
+        previewBack.classList.add('has-image');
+    }
+
+    btnClearBack.classList.remove('hidden');
+    const countEl = document.getElementById('back-count');
+    const totalItems = (backTextData ? 1 : 0) + backImages.length;
+    countEl.textContent = `(${totalItems})`;
+    countEl.classList.remove('hidden');
+}
+
+async function removeImageAt(side, index) {
+    if (side === 'front') {
+        frontImages.splice(index, 1);
+        renderThumbnails(previewFront, frontImages, 'front');
+        if (frontImages.length === 0) btnQuestion.classList.remove('captured');
+    } else if (side === 'back') {
+        backImages.splice(index, 1);
+        renderBackPreview();
+        if (backImages.length === 0 && !backTextData) btnAnswer.classList.remove('captured');
+    }
+
+    await chrome.runtime.sendMessage({
+        action: 'removeImage',
+        side: side,
+        index: index
+    });
+
+    updateSaveButton();
+    showStatus('画像を削除しました', 'info');
 }
 
 // --- Save Card ---
 async function saveCard() {
-    const frontText = frontTextInput.value.trim();
-    const hasFront = !!(frontImageData || frontText);
+    const frontTextVal = frontTextInput.value.trim();
     const backTextVal = backTextInput.value.trim();
+    const hasFront = !!(frontImages.length > 0 || frontTextVal);
 
     if (!currentDeck || !currentModel || !hasFront) {
-        showStatus('デッキ、ノートタイプ、問題の入力が必要です', 'error');
+        showStatus('デッキ、ノートタイプ、問題の入力（または画像）が必要です', 'error');
         return;
     }
 
@@ -684,14 +796,14 @@ async function saveCard() {
             action: 'addCard',
             deckName: currentDeck,
             modelName: currentModel,
-            frontImage: frontImageData,
-            frontText: frontText || null,
-            backImage: (resolvedBackText ? null : backImageData),
+            frontImages: frontImages,
+            frontText: frontTextVal || null,
+            backImages: backImages,
             backText: resolvedBackText
         });
 
         if (response.success) {
-            showStatus('カードを保存しました！ 🎉', 'success');
+            showStatus('カードを保存しました', 'success');
             resetCard();
         } else {
             throw new Error(response.error);
@@ -704,11 +816,10 @@ async function saveCard() {
 
 // --- Clear ---
 function clearFront() {
-    frontImageData = null;
-    previewFront.innerHTML = '';
-    previewFront.classList.add('hidden');
+    frontImages = [];
+    renderThumbnails(previewFront, frontImages, 'front');
     frontTextInput.value = '';
-    btnClearFront.classList.add('hidden');
+    btnQuestion.classList.remove('captured');
     chrome.runtime.sendMessage({ action: 'storeImage', side: 'front', imageData: null });
     chrome.runtime.sendMessage({ action: 'storeText', side: 'front', text: '' });
     updateSaveButton();
@@ -716,12 +827,11 @@ function clearFront() {
 }
 
 function clearBack() {
-    backImageData = null;
+    backImages = [];
     backTextData = null;
-    previewBack.innerHTML = '';
-    previewBack.classList.add('hidden');
+    renderBackPreview();
     backTextInput.value = '';
-    btnClearBack.classList.add('hidden');
+    btnAnswer.classList.remove('captured');
     chrome.runtime.sendMessage({ action: 'storeImage', side: 'back', imageData: null });
     chrome.runtime.sendMessage({ action: 'storeImage', side: 'backText', imageData: null });
     chrome.runtime.sendMessage({ action: 'storeText', side: 'back', text: '' });
@@ -731,19 +841,19 @@ function clearBack() {
 
 // --- Reset ---
 function resetCard() {
-    frontImageData = null;
-    backImageData = null;
+    frontImages = [];
+    backImages = [];
     backTextData = null;
 
-    previewFront.innerHTML = '';
-    previewFront.classList.add('hidden');
-    previewBack.innerHTML = '';
-    previewBack.classList.add('hidden');
+    renderThumbnails(previewFront, frontImages, 'front');
+    renderBackPreview();
+
     frontTextInput.value = '';
     backTextInput.value = '';
 
-    btnClearFront.classList.add('hidden');
-    btnClearBack.classList.add('hidden');
+    btnQuestion.classList.remove('captured');
+    btnAnswer.classList.remove('captured');
+    updateSaveButton();
 
     // バックグラウンドの状態もリセット
     chrome.runtime.sendMessage({ action: 'storeText', side: 'front', text: '' });
@@ -760,8 +870,7 @@ function enableButtons() {
 }
 
 function updateSaveButton() {
-    const frontText = frontTextInput ? frontTextInput.value.trim() : '';
-    const hasFront = !!(frontImageData || frontText);
+    const hasFront = !!(frontImages.length > 0 || (frontTextInput && frontTextInput.value.trim()));
     btnSave.disabled = !(currentDeck && currentModel && hasFront);
 }
 
