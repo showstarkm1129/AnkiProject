@@ -441,11 +441,16 @@ async function addCard(message) {
 
         // フィールドを構築
         const fields = {};
-        // 表面: テキストありならテキスト、なければ空
-        fields[frontField] = frontTxt || '';
+        // 表面: テキストありならテキスト（上部中央）、なければ空
+        fields[frontField] = frontTxt
+            ? `<div style="text-align:center;">${frontTxt}</div>`
+            : '';
 
-        // 裏面: テキストありならテキスト、なければ空
-        fields[backField] = backTxt || cardState.userBackText || '';
+        // 裏面: テキストありならテキスト（上部中央）、なければ空
+        const rawBackText = backTxt || cardState.userBackText || '';
+        fields[backField] = rawBackText
+            ? `<div style="text-align:center;">${rawBackText}</div>`
+            : '';
 
         // 画像設定
         const picture = [];
