@@ -557,8 +557,6 @@ async function startCapture(side) {
 
     showStatus(`${side === 'front' ? '問題' : '解説'}の範囲を選択してください...`, 'info');
 
-    showStatus(`${side === 'front' ? '問題' : '解説'}の範囲を選択してください...`, 'info');
-
     let tabId = targetTabId;
     if (!tabId) {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
