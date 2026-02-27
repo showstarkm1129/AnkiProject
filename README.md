@@ -60,6 +60,8 @@ AnkiConnectが正しく動作しているか確認するために、ポート番
 ```
 AnkiProject/
 ├── manifest.json          # 拡張機能設定
+├── LICENSE                # MITライセンス
+├── PRIVACY_POLICY.md      # プライバシーポリシー
 ├── popup/                 # ツールバーポップアップ
 │   ├── popup.html
 │   ├── popup.css
@@ -68,9 +70,6 @@ AnkiProject/
 │   └── content.js
 ├── background/            # バックグラウンド処理
 │   └── background.js
-├── offscreen/             # 画像トリミング処理
-│   ├── offscreen.html
-│   └── offscreen.js
 └── icons/                 # アイコン
     ├── icon16.png
     ├── icon48.png
