@@ -191,6 +191,10 @@ async function generateExplanation(message) {
         return { success: false, error: 'APIキーが設定されていません' };
     }
 
+    if (!llmModel) {
+        return { success: false, error: 'モデル名を入力してください' };
+    }
+
     if (!imageData) {
         return { success: false, error: '問題の画像がありません' };
     }
@@ -208,13 +212,13 @@ async function generateExplanation(message) {
     try {
         let text;
         if (provider === 'gemini') {
-            text = await callGemini(apiKey, base64, mimeType, systemPrompt, llmModel || 'gemini-2.5-flash');
+            text = await callGemini(apiKey, base64, mimeType, systemPrompt, llmModel);
         } else if (provider === 'openai') {
-            text = await callOpenAI(apiKey, base64, mimeType, systemPrompt, llmModel || 'gpt-4o-mini');
+            text = await callOpenAI(apiKey, base64, mimeType, systemPrompt, llmModel);
         } else if (provider === 'anthropic') {
-            text = await callAnthropic(apiKey, base64, mimeType, systemPrompt, llmModel || 'claude-3-5-sonnet-20241022');
+            text = await callAnthropic(apiKey, base64, mimeType, systemPrompt, llmModel);
         } else if (provider === 'openrouter') {
-            text = await callOpenRouter(apiKey, base64, mimeType, systemPrompt, llmModel || 'deepseek/deepseek-chat');
+            text = await callOpenRouter(apiKey, base64, mimeType, systemPrompt, llmModel);
         } else {
             return { success: false, error: `未対応のAPI: ${provider}` };
         }

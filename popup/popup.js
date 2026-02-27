@@ -41,12 +41,12 @@ const apiStatus = document.getElementById('api-status');
 const customInstruction = document.getElementById('custom-instruction');
 
 
-// --- デフォルトモデル名 ---
+// --- デフォルトモデル名（空欄：ユーザーが使用するモデルを入力してください） ---
 const DEFAULT_MODELS = {
-    gemini: 'gemini-2.5-flash',
-    openai: 'gpt-4o-mini',
-    anthropic: 'claude-3-5-sonnet-20241022',
-    openrouter: 'deepseek/deepseek-chat'
+    gemini: '',
+    openai: '',
+    anthropic: '',
+    openrouter: ''
 };
 
 // --- Initialization ---
