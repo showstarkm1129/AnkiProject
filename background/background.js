@@ -18,11 +18,6 @@ let cardState = {
 
 // --- メッセージハンドラ ---
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    // offscreen用メッセージは無視
-    if (message.action === 'cropImage') {
-        return false;
-    }
-
     handleMessage(message, sender)
         .then(sendResponse)
         .catch(error => sendResponse({ success: false, error: error.message }));
@@ -216,6 +211,8 @@ async function generateExplanation(message) {
             text = await callGemini(apiKey, base64, mimeType, systemPrompt, llmModel || 'gemini-2.5-flash');
         } else if (provider === 'openai') {
             text = await callOpenAI(apiKey, base64, mimeType, systemPrompt, llmModel || 'gpt-4o-mini');
+        } else if (provider === 'anthropic') {
+            text = await callAnthropic(apiKey, base64, mimeType, systemPrompt, llmModel || 'claude-3-5-sonnet-20241022');
         } else if (provider === 'openrouter') {
             text = await callOpenRouter(apiKey, base64, mimeType, systemPrompt, llmModel || 'deepseek/deepseek-chat');
         } else {
@@ -368,48 +365,6 @@ async function callAnthropic(apiKey, base64, mimeType, prompt, model) {
     throw new Error('Anthropic APIから回答を取得できませんでした');
 }
 
-// --- OpenRouter API ---
-async function callOpenRouter(apiKey, base64, mimeType, prompt, model) {
-    const url = 'https://openrouter.ai/api/v1/chat/completions';
-
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-            // 'HTTP-Referer': 'https://github.com/your-repo', // Optional
-            // 'X-Title': 'Anki Card Creator' // Optional
-        },
-        body: JSON.stringify({
-            model: model,
-            messages: [{
-                role: 'user',
-                content: [
-                    { type: 'text', text: prompt },
-                    {
-                        type: 'image_url',
-                        image_url: {
-                            url: `data:${mimeType};base64,${base64}`
-                        }
-                    }
-                ]
-            }]
-        })
-    });
-
-    if (!response.ok) {
-        const errorBody = await response.text();
-        throw new Error(`OpenRouter API error (${response.status}): ${errorBody}`);
-    }
-
-    const result = await response.json();
-
-    if (result.choices && result.choices[0]?.message?.content) {
-        return result.choices[0].message.content;
-    }
-
-    throw new Error('OpenRouter APIから回答を取得できませんでした');
-}
 
 // ===========================================
 // カード追加

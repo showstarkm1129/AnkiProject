@@ -585,7 +585,7 @@ async function generateAiExplanation() {
         showStatus('先に問題を入力またはキャプチャしてください', 'error');
         return;
     }
-    if (!frontImageData) {
+    if (!frontImages[0]) {
         showStatus('AI解説には問題の画像が必要です', 'error');
         return;
     }
