@@ -94,6 +94,9 @@
 7. **「💾 カードを保存」** をクリック → Ankiにカードが追加されます！
 8. 次のカードの作成へ 🎉
 
+![AnkiProject](https://github.com/user-attachments/assets/0ac0b072-917d-4d52-ba49-987f6273e43f)
+
+---
 ### 🤖 AI解説機能（オプション）
 
 問題の画像だけあれば、AIが自動で解説を書いてくれる機能です。
