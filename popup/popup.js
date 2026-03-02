@@ -589,12 +589,14 @@ async function generateAiExplanation() {
     }
 
 
-    const tempSettings = await chrome.storage.local.get(['apiProvider', 'llmModel']);
+    const tempSettings = await chrome.storage.local.get(['apiProvider']);
     const provider = tempSettings.apiProvider || 'gemini';
     const keyName = `apiKey_${provider}`;
+    const modelKeyName = `llmModel_${provider}`;
 
-    const settings = await chrome.storage.local.get([keyName]);
+    const settings = await chrome.storage.local.get([keyName, modelKeyName]);
     const apiKey = settings[keyName];
+    const llmModel = settings[modelKeyName] || llmModelInput.value || DEFAULT_MODELS[provider];
 
     if (!apiKey) {
         showStatus('APIキーを設定してください', 'error');
@@ -610,7 +612,7 @@ async function generateAiExplanation() {
             imageData: frontImages[0],
             provider: provider,
             apiKey: apiKey,
-            llmModel: tempSettings.llmModel || DEFAULT_MODELS[provider],
+            llmModel: llmModel,
             customInstruction: customInstruction.value || ''
         });
 
